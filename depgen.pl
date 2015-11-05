@@ -65,11 +65,46 @@ sub dispatch_{
     }
 }
 
+
+sub do_setup_{
+    my($jdk, $maven) = @_;
+    my $j = &untar_($BINDIR, $jdk);
+    my $m = &untar_($BINDIR, $maven);
+    
+    
+    my($mvn) =<< "END_OF_MVN";
+#!/bin/sh
+
+export JAVA_HOME=$BINDIR/$jdk
+args=$*
+
+for opt in $args; do
+  case "$opt" in
+    "--show-java-home") echo "/Users/ywata/bin_/$d"; exit 0;;
+    "--show-mvn") echo "depgen.pl" ; exit 0;;
+  esac
+done
+
+/Users/ywata/bin_/$m/bin/mvn $*
+END_OF_MVN
+    &create_script_($BINDIR, "mvn", $mvn);
+}
+
+sub do_checkout_{
+    my($opt, @argv) = @_;
+    `$SVN $opt @argv`;
+    if($?){
+	
+    }
+    
+}
+
+
 sub do_build_{
     my(@dirs) = @_; 
     print STDERR "do_build_:@dirs\n";
 
-    my($show_info) = `mvn --show-info`;
+#    my($show_info) = `mvn --show-info`;
     chomp($show_info);
 
     $? = 0; # XXX
@@ -81,34 +116,82 @@ sub do_build_{
     }else{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
-    my($file, $tag, $ver) = @_;
-    my($c) = "$tag:$ver";
-    if(&check_tag($c)){
-	# Good.
-    }else{
-	die "Unknown tag $tag found.:$c";
-    }
+
     
-    open(W, ">$file") or die $!;
-    print W "$c";
-    close(W);
 }
 
-sub check_tag{
+sub run_{
+    my($command) = @_;
+    `$command`;
+    if($?){
+	die "$command failed";
+    }
+}
+
+sub untar_{
+    my($dir, $tgz) = @_;
+
+    chdir $dir || die "cd $dir failed";
+    open(TAR, "$TAR xvzf $cwd/$tgz 2>&1 |") or die $!;
+    my $top;
+    while(<TAR>){
+	if(m/^x ([^\/]+)/){
+	    $top = $1;
+	}
+    }
+    close(TAR);
+
+    if($top ne ""){
+	return $top;
+    }
+    
+    chdir $cwd || die "cd $dir failed";
+}
+
+sub get_tag{
     my($a) = @_;
     my($tag, $ver) = split(/:/, $a);
     if($tag eq ""){
-	#
-	return 1;
+	return ("time", $build_started);
     }else{
 	if($tag eq "tag" and $ver ne ""){
-	    return 1;
+	    return ("tag", $ver);
 	}elsif($tag eq "rev" and $ver =~ m|[1-9][0-9]*|){
-	    return 1;
+	    return ("rev", $ver);
 	}else{
-	    return 0;
+	    return ("time", $build_started);
 	}
     }
+}
+
+sub create_script_{
+    my($d, $file, $script) = @_;
+    &mkdir_($d);
+    my($f) = "$d/$file";
+    open(SCRIPT, ">$f") or die "cannot create $f";
+    print SCRIPT $script;
+    close(SCRIPT);
+
+    my($mode) = 0755;
+    chmod $mode, $f || die "chmod $f failed";
+}
+
+sub mkdir_{
+    my($d) = @_;
+    if( ! -d $d){
+	mkdir($d) or die "Cannot mkdir $d";
+    }
+}
+
+sub findFile{
+    my($file, @dirs) = @_;
+    foreach my $d (@dirs){
+	my($f) = "$d/$file";
+	if( -f $f){
+	    return $f
+	}
+    }
+    die "$file not found in @dirs";
 }
 
 sub fetch{
@@ -132,6 +215,22 @@ sub fetch{
     }
 }
 
+sub readVersion_{
+    my($f) = @_;
+    open(F, "$f") or die "cannot open $f";
+    my($l) = <F>;
+    close(F);
+    my($R, $V) = &get_tag("l");
+    return($R, $V);
+}
+sub writeVersion_{
+    my($f, $r, $v) = @_;
+
+    my($R, $V) = &get_tag("$r:$v");
+    open(F, ">$f") or die "cannot create $f";
+    print F "$R:$V";
+    close(F);
+}
 
 sub usage_{
     my($prog) = @_;
