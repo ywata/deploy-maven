@@ -5,6 +5,7 @@ $TAR = "tar";
 $SVN = "svn";
 $RM  = "/bin/rm";
 $CURL = "curl";
+$INSTALL = "install";
 
 $BINDIR = "$ENV{HOME}/bin_";
 $JAVA_HOME = "java_home";
@@ -12,9 +13,12 @@ $MAVEN_VER = "3.3.3";
 
 $BUILD_VERSION_FILE = ".build_version";
 
+$CHROOT = "chroot";
+
 $TAR = &findFile($TAR, @Bins);
 $SVN = &findFile($SVN, @Bins);
 $CURL = &findFile($CURL, @Bins);
+$INSTALL = &findFile($INSTALL, @Bins);
 
 $REMOTE = "remotehost:/home/users/";
     
@@ -55,7 +59,11 @@ sub dispatch_{
 	my($opt) = "checkout  -r " . shift @argv;
 	&do_checkout_($opt, @argv);
     }elsif(($ARGV[0] eq "build")){
-	&do_build_(@argv);
+	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
+	&do_build_($t, $v, @argv);
+    }elsif(($ARGV[0] eq "transfer")){
+	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
+	&do_transfer_($t, $v, @argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif($ARGV[0] eq "purge"){
@@ -71,12 +79,11 @@ sub do_setup_{
     my $j = &untar_($BINDIR, $jdk);
     my $m = &untar_($BINDIR, $maven);
     
-    
     my($mvn) =<< "END_OF_MVN";
 #!/bin/sh
 
 export JAVA_HOME=$BINDIR/$jdk
-args=$*
+args=\$*
 
 for opt in $args; do
   case "$opt" in
@@ -85,7 +92,7 @@ for opt in $args; do
   esac
 done
 
-/Users/ywata/bin_/$m/bin/mvn $*
+/Users/ywata/bin_/$m/bin/mvn \$*
 END_OF_MVN
     &create_script_($BINDIR, "mvn", $mvn);
 }
@@ -101,7 +108,7 @@ sub do_checkout_{
 
 
 sub do_build_{
-    my(@dirs) = @_; 
+    my($t, $v, @dirs) = @_; 
     print STDERR "do_build_:@dirs\n";
 
 #    my($show_info) = `mvn --show-info`;
@@ -117,7 +124,126 @@ sub do_build_{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
 
+    my @deps;
+    foreach my $d (@dirs){
+	chdir $d || die "cd $d failed";
+	`mvn clean dependency:copy-dependencies package`;
+	if($?){
+	    print "$d mvn failed";
+	}
+	my @dp = &get_dependencies($d);
+	push @deps, @dp;
+	chdir $cwd || die "cd $cwd failed";
+    }
+    &create_archive($t, $v, @dirs);
+}
+
+sub do_transfer_{
+    my($tag, $ver, $file, $remote, @hosts) = @_;
+    my(@path) = split /\//, $file;
+
+    if(-f $file ){
+	&run_("scp $file $remote:");
+
+    }else{
+	die "$file not found.";
+    }
+    &ssh_($remote, "rm -rf ./usr");
+    &ssh_($remote, "tar xvzf $path[-1]");
+}
+
+
+sub create_archive{
+    my($tag, $ver, @dirs)  = @_;
+    my($prod) = "$CHROOT/usr/local/prod";
+    my($lib, $archive);
+
+    if($ver eq ""){
+	$lib = "$prod/lib";
+	$archive = "archive.tar.gz";
+    }else{
+	$lib = "$prod/lib.$ver";
+	$archive = "archive.$ver.tar.gz";
+    }
+ 
+    &mkdir_($CHROOT);
+    &install_dir("$prod/bin", "$prod/conf", "$lib");
     
+    foreach my $d (@dirs){
+	open(FIND, "find $d |") or die "find $d failed";
+	while(<FIND>){
+	    my($where, $dep, $name, $target);
+	    chomp;
+	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
+		next;
+	    }elsif(m|(.+)/target/dependency/([^/]+\.jar)|){
+		($where, $dep, $name, $target) = ($1, 1, $2, $_);
+	    }elsif(m|(.+)/target/([^/]+\.jar)|){
+		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+	    }else{
+		next;
+	    }
+	    my($w) = "$lib/$where";
+	    if(! -d $w){
+		&install_dir($w);
+	    }
+	    &install_file($target, "$w/$name");
+	}
+	close(FIND);
+    }
+    &archive_($CHROOT, $archive);
+}
+
+sub archive_{
+    my($chroot, $archive)  = @_;
+    chdir $chroot or die "cd $chroot failed";
+    &run_("$TAR cvzf $archive ./usr");
+    
+    chdir $cwd or die "cd $cwd";
+}
+
+sub install_file{
+    my($file, $dir, @opt) = @_;
+    &install_($file, $dir, @opt);
+}
+
+sub install_{
+    my($file, $dir, @opt) = @_;
+    &run_("$INSTALL @opt $file $dir");
+}
+
+sub install_dir{
+    my(@dir) = @_;
+    foreach my $d (@dir){
+	&run_("$INSTALL -d $d");
+    }
+}
+
+sub get_dependencies{
+    my(@deps);
+    open(F, "mvn dependency:list |") or die "$mvn failed";
+    if(! -f "pom.xml"){
+	die "No pom.xml found.";
+    }
+    while(<F>){
+	last if(m|\[INFO\] The following files have been resolved:|);
+    }
+    while(<F>){
+	if(m|\INFO\] +(.+):(.+):(.+):(.+):(.+)|){
+	    push @deps, ($1, $2, $3, $4, $5);
+	}else{
+	    last;
+	}
+    }
+    close(F);
+    print "@deps \n";
+    return @deps;
+}
+
+sub ssh_{
+    my($host, $command, @opt) = @_;
+#    print "ssh $host $command @opt\n";
+    &run_("ssh $host $command @opt");
 }
 
 sub run_{
@@ -163,6 +289,8 @@ sub get_tag{
 	}
     }
 }
+
+
 
 sub create_script_{
     my($d, $file, $script) = @_;
