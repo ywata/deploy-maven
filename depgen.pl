@@ -61,9 +61,9 @@ sub dispatch_{
     }elsif(($ARGV[0] eq "build")){
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
-    }elsif(($ARGV[0] eq "transfer")){
+    }elsif(($ARGV[0] eq "deploy")){
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
-	&do_transfer_($t, $v, @argv);
+	&do_deploy_($t, $v, @argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif($ARGV[0] eq "purge"){
@@ -92,7 +92,7 @@ for opt in $args; do
   esac
 done
 
-/Users/ywata/bin_/$m/bin/mvn \$*
+$m/bin/mvn \$*
 END_OF_MVN
     &create_script_($BINDIR, "mvn", $mvn);
 }
@@ -106,9 +106,23 @@ sub do_checkout_{
     
 }
 
+sub do_deploy_{
+    my($tag, $ver, $file, $remote, @hosts) = @_;
+    my(@path) = split /\//, $file;
+
+    if(-f $file ){
+	&run_("scp $file $remote:");
+    }else{
+	die "$file not found.";
+    }
+    &ssh_($remote, "rm -rf ./usr");
+    &ssh_($remote, "tar xvzf $path[-1]");
+    &ssh_($remote, "ls -l /");
+
+}
 
 sub do_build_{
-    my($t, $v, @dirs) = @_; 
+    my($tag, $ver, @dirs) = @_; 
     print STDERR "do_build_:@dirs\n";
 
 #    my($show_info) = `mvn --show-info`;
@@ -127,47 +141,108 @@ sub do_build_{
     my @deps;
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-	`mvn clean dependency:copy-dependencies package`;
+#	`mvn clean dependency:copy-dependencies package`;
 	if($?){
 	    print "$d mvn failed";
 	}
-	my @dp = &get_dependencies($d);
+#	my @dp = &get_dependencies($d);
 	push @deps, @dp;
 	chdir $cwd || die "cd $cwd failed";
     }
-    &create_archive($t, $v, @dirs);
-}
-
-sub do_transfer_{
-    my($tag, $ver, $file, $remote, @hosts) = @_;
-    my(@path) = split /\//, $file;
-
-    if(-f $file ){
-	&run_("scp $file $remote:");
-
-    }else{
-	die "$file not found.";
-    }
-    &ssh_($remote, "rm -rf ./usr");
-    &ssh_($remote, "tar xvzf $path[-1]");
-}
-
-
-sub create_archive{
-    my($tag, $ver, @dirs)  = @_;
-    my($prod) = "$CHROOT/usr/local/prod";
-    my($lib, $archive);
+    my($lib, $bin, $conf, $archive, $prod);
+    my $prod = "usr/local/prod";
 
     if($ver eq ""){
 	$lib = "$prod/lib";
+	$bin = "$prod/bin";
+	$conf = "$prod/conf";
 	$archive = "archive.tar.gz";
     }else{
 	$lib = "$prod/lib.$ver";
+	$bin = "$prod/bin";
+	$conf = "$prod/conf";
 	$archive = "archive.$ver.tar.gz";
     }
- 
+    &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
-    &install_dir("$prod/bin", "$prod/conf", "$lib");
+    &install_dir("$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
+    
+    &create_deploy_sh_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
+    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");    
+    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", @dirs);
+}
+
+
+# host: chroot/archive.???.tar.gz 
+# step server: $HOME/archive.???.tar.gz
+#                   usr/local/prod/bin
+#                   usr/local/prod/conf
+#                   usr/local/prod/lib.???
+# target server : $HOME/archive.???.tar.gz
+#                      usr/local/prod/bin
+#                      usr/local/prod/conf
+#                      usr/local/prod/lib.???
+#                  /usr/local/prod/bin
+#                  /usr/local/prod/conf
+#                  /usr/local/prod/lib.???
+#                  /usr/local/prod/lib
+
+
+
+sub create_deploy_sh_{
+    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
+    my($lib_) = (split /\//, $lib)[-1];
+    my($sh) = "deploy_self.sh";
+
+    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
+    print S << "END_OF_DEPLOY";
+#!/bin/sh
+
+# The script runs on target server.
+echo "Done!"
+
+exit 0
+top=test
+mkdir \$top
+cd \$top
+install -d $lib
+install -d $bin
+install -d $conf
+tar xvzf \$HOME/$archive
+if [ -f $prod/lib ]; then
+  rm -f $prod/lib
+fi
+
+ln -s $lib $prod/lib
+
+END_OF_DEPLOY
+    close(S);
+    chmod 0755, "$CHROOT/$bin/$sh" or die "chmod $CHROOT/$bin/$sh failed. $cwd";
+}
+
+sub create_deploy_one_{
+    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
+    my($lib_) = (split /\//, $lib)[-1];
+    my($sh) = "deploy_one.sh";
+# This script runs on step server.
+
+
+    my($user, $host) = ("bitnami","10.0.1.7");
+    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
+    print S << "END_OF_DEPLOY";
+#!/bin/sh
+
+scp $archive $user\@$host:
+ssh $user\@$host tar xvzf $archive
+ssh $user\@$host $bin/deploy_self.sh
+
+END_OF_DEPLOY
+    close(S);
+    chmod 0755, "$CHROOT/$bin/$sh" or die "chmod $sh failed";
+}
+
+sub create_archive{
+    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, $prod, @dirs)  = @_;
     
     foreach my $d (@dirs){
 	open(FIND, "find $d |") or die "find $d failed";
@@ -183,7 +258,7 @@ sub create_archive{
 	    }else{
 		next;
 	    }
-	    my($w) = "$lib/$where";
+	    my($w) = "$CHROOT/$lib/$where";
 	    if(! -d $w){
 		&install_dir($w);
 	    }
@@ -197,7 +272,7 @@ sub create_archive{
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
-    &run_("$TAR cvzf $archive ./usr");
+    &run_("$TAR cvzf $archive usr");
     
     chdir $cwd or die "cd $cwd";
 }
