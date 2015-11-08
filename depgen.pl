@@ -364,7 +364,9 @@ sub untar_{
 sub get_tag{
     my($a) = @_;
     my($tag, $ver) = split(/:/, $a);
+
     if($tag eq ""){
+
 	return ("time", $build_started);
     }else{
 	if($tag eq "tag" and $ver ne ""){
@@ -437,7 +439,7 @@ sub readVersion_{
     open(F, "$f") or die "cannot open $f";
     my($l) = <F>;
     close(F);
-    my($R, $V) = &get_tag("l");
+    my($R, $V) = &get_tag("$l");
     return($R, $V);
 }
 sub writeVersion_{
@@ -457,6 +459,7 @@ usage:$prog setup jdk-id            # setup mvn & JAVA_HOME
       $prog tag-checkout tag url    # checkout latest source from url with tag
       $prog rev-checkout rev url    # checkout latest source from url with rev
       $prog build [dirs]            # build and archive files to transfer
+      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
 
       $prog get-license dir [dirs]
 END_OF_USAGE
