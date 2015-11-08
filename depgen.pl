@@ -66,6 +66,8 @@ sub dispatch_{
 	&do_deploy_($t, $v, @argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
+    }elsif(($ARGV[0] eq "depend")){
+	
     }elsif($ARGV[0] eq "purge"){
 	&do_purge_checkout_(@argv);
     }else{
@@ -188,8 +190,6 @@ sub do_build_{
 #                  /usr/local/prod/lib.???
 #                  /usr/local/prod/lib
 
-
-
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
@@ -205,15 +205,15 @@ sub create_deploy_self_{
 top=test
 mkdir \$top
 cd \$top
-install -d $lib
-install -d $bin
-install -d $conf
-tar xvzf \$HOME/$archive
+sudo install -d $lib
+sudo install -d $bin
+sudo install -d $conf
+sudo tar xvzf \$HOME/$archive
 if [ -f $prod/lib ]; then
-  rm -f $prod/lib
+  sudo rm -f $prod/lib
 fi
 
-ln -s $lib $prod/lib
+sudo ln -s $lib $prod/lib
 
 END_OF_DEPLOY
     close(S);
