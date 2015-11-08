@@ -107,18 +107,19 @@ sub do_checkout_{
 }
 
 sub do_deploy_{
-    my($tag, $ver, $file, $remote, @hosts) = @_;
+    my($tag, $ver, $file, $step_user, $step_host, $target_user, @hosts) = @_;
     my(@path) = split /\//, $file;
 
     if(-f $file ){
-	&run_("scp $file $remote:");
+	&run_("scp $file $step_user\@$step_host:");
     }else{
 	die "$file not found.";
     }
-    &ssh_($remote, "rm -rf ./usr");
-    &ssh_($remote, "tar xvzf $path[-1]");
-    &ssh_($remote, "ls -l /");
-
+    &ssh_("rm -rf usr", "", $step_user, $step_host);
+    &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
+    foreach my $h (@hosts){
+	&ssh_("usr/local/prod/bin/deploy_one.sh $target_user $h", "-t", $step_user, $step_host);
+    }
 }
 
 sub do_build_{
@@ -141,11 +142,11 @@ sub do_build_{
     my @deps;
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-#	`mvn clean dependency:copy-dependencies package`;
+	`mvn clean dependency:copy-dependencies package`;
 	if($?){
 	    print "$d mvn failed";
 	}
-#	my @dp = &get_dependencies($d);
+	my @dp = &get_dependencies($d);
 	push @deps, @dp;
 	chdir $cwd || die "cd $cwd failed";
     }
@@ -167,7 +168,7 @@ sub do_build_{
     &mkdir_($CHROOT);
     &install_dir("$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
     
-    &create_deploy_sh_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
+    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");    
     &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", @dirs);
 }
@@ -189,7 +190,7 @@ sub do_build_{
 
 
 
-sub create_deploy_sh_{
+sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_self.sh";
@@ -199,9 +200,8 @@ sub create_deploy_sh_{
 #!/bin/sh
 
 # The script runs on target server.
-echo "Done!"
 
-exit 0
+
 top=test
 mkdir \$top
 cd \$top
@@ -224,18 +224,17 @@ sub create_deploy_one_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
-# This script runs on step server.
-
-
-    my($user, $host) = ("bitnami","10.0.1.7");
+    # This script runs on step server.
     open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
     print S << "END_OF_DEPLOY";
 #!/bin/sh
 
-scp $archive $user\@$host:
-ssh $user\@$host tar xvzf $archive
-ssh $user\@$host $bin/deploy_self.sh
+target_user=\$1
+target_host=\$2
 
+scp $archive \$target_user\@\$target_host:$archive
+ssh \$target_user\@\$target_host tar xvzf $archive
+ssh -t \$target_user\@\$target_host $bin/deploy_self.sh 
 END_OF_DEPLOY
     close(S);
     chmod 0755, "$CHROOT/$bin/$sh" or die "chmod $sh failed";
@@ -316,9 +315,22 @@ sub get_dependencies{
 }
 
 sub ssh_{
-    my($host, $command, @opt) = @_;
-#    print "ssh $host $command @opt\n";
-    &run_("ssh $host $command @opt");
+    my($command, $opt, $user,  @hosts) = @_;
+    print STDERR "ssh $user $command --> @hosts\n";
+    foreach my $h (@hosts){
+	&ssh__($user, $h, $command, $opt);
+    }
+}
+
+sub ssh__{
+    my($user, $host, $command, @opt) = @_;
+    #    print "ssh $host $command @opt\n";
+    print STDERR "ssh $user\@$host $command @opt\n";
+    open(SSH, "ssh @opt $user\@$host $command |") or die "ssh $host $command failed";
+    while(<SSH>){
+	print;
+    }
+    close(SSH);
 }
 
 sub run_{
@@ -356,9 +368,11 @@ sub get_tag{
 	return ("time", $build_started);
     }else{
 	if($tag eq "tag" and $ver ne ""){
-	    return ("tag", $ver);
+	    return ($tag, $ver);
 	}elsif($tag eq "rev" and $ver =~ m|[1-9][0-9]*|){
-	    return ("rev", $ver);
+	    return ($tag, $ver);
+	}elsif($tag eq "time" and $ver ne ""){
+	    return ($tag, $ver);
 	}else{
 	    return ("time", $build_started);
 	}
