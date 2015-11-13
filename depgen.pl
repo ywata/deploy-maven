@@ -84,17 +84,17 @@ sub do_setup_{
     my($mvn) =<< "END_OF_MVN";
 #!/bin/sh
 
-export JAVA_HOME=$BINDIR/$jdk
+export JAVA_HOME=$BINDIR/$j
 args=\$*
 
-for opt in $args; do
-  case "$opt" in
+for opt in \$args; do
+  case "\$opt" in
     "--show-java-home") echo "/Users/ywata/bin_/$d"; exit 0;;
     "--show-mvn") echo "depgen.pl" ; exit 0;;
   esac
 done
 
-$m/bin/mvn \$*
+$BINDIR/$m/bin/mvn \$*
 END_OF_MVN
     &create_script_($BINDIR, "mvn", $mvn);
 }
