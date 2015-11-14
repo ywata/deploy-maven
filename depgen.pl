@@ -81,6 +81,8 @@ sub do_setup_{
     if(! -d $BINDIR){
 	mkdir $BINDIR or die "$BINDIR creation failed";
     }
+    
+    
     my $j = &untar_($BINDIR, $jdk);
     my $m = &untar_($BINDIR, $maven);
     
@@ -203,7 +205,6 @@ sub create_deploy_self_{
 #!/bin/sh
 
 # The script runs on target server.
-
 
 top=test
 mkdir \$top
@@ -358,10 +359,13 @@ sub untar_{
     close(TAR);
 
     if($top ne ""){
+	chdir $cwd || die "cd $dir failed";
 	return $top;
+    }else{
+	die "no contents found in $tgz";
     }
     
-    chdir $cwd || die "cd $dir failed";
+    
 }
 
 sub get_tag{
