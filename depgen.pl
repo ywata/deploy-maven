@@ -78,6 +78,9 @@ sub dispatch_{
 
 sub do_setup_{
     my($jdk, $maven) = @_;
+    if(! -d $BINDIR){
+	mkdir $BINDIR or die "$BINDIR creation failed";
+    }
     my $j = &untar_($BINDIR, $jdk);
     my $m = &untar_($BINDIR, $maven);
     
