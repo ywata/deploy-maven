@@ -85,6 +85,7 @@ sub do_setup_{
     
     my $j = &untar_($BINDIR, $jdk);
     my $m = &untar_($BINDIR, $maven);
+
     
     my($mvn) =<< "END_OF_MVN";
 #!/bin/sh
@@ -101,6 +102,7 @@ done
 
 $BINDIR/$m/bin/mvn \$*
 END_OF_MVN
+    
     &create_script_($BINDIR, "mvn", $mvn);
 }
 
@@ -352,8 +354,8 @@ sub untar_{
     open(TAR, "$TAR xvzf $cwd/$tgz 2>&1 |") or die $!;
     my $top;
     while(<TAR>){
-	if(m/^x ([^\/]+)/){
-	    $top = $1;
+	if(m/^(x )?([^\/]+)/){
+	    $top = $2;
 	}
     }
     close(TAR);
