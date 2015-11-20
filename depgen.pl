@@ -151,10 +151,8 @@ sub do_build_{
     my @deps;
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-	`mvn clean dependency:copy-dependencies package`;
-	if($?){
-	    print "$d mvn failed";
-	}
+#	`mvn clean dependency:copy-dependencies package`;
+	&run_mvn("clean dependency:copy-dependencies package");
 	my @dp = &get_dependencies($d);
 	push @deps, @dp;
 	chdir $cwd || die "cd $cwd failed";
@@ -274,6 +272,17 @@ sub create_archive{
     &archive_($CHROOT, $archive);
 }
 
+sub run_mvn{
+    my($opt) = @_;
+    my($mvn) = "mvn $opt 2>1 ";
+    my $res = `$mvn`;
+#    my @res = split(/\n/, $res);
+
+    if($?){
+	die "$res\n Sorry $mvn failed.";
+    }
+}
+
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
@@ -306,7 +315,7 @@ sub get_dependencies{
 	die "No pom.xml found.";
     }
     while(<F>){
-	last if(m|\[INFO\] The following files have been resolved:|);
+	last if(m|^\[INFO\] The following files have been resolved:|);
     }
     while(<F>){
 	if(m|\INFO\] +(.+):(.+):(.+):(.+):(.+)|){
@@ -433,7 +442,7 @@ sub fetch{
     }else{
 	$curl = "$CURL -j -k -L -H \"$cookie\" ";
     }
-
+    print STDERR "$url\n";
     $curl .= "$url > $file";
     if( ! -f $file){
 	`$curl`;
@@ -445,7 +454,7 @@ sub fetch{
 
 sub readVersion_{
     my($f) = @_;
-    open(F, "$f") or die "cannot open $f";
+    open(F, "$f") or &get_tag(":");
     my($l) = <F>;
     close(F);
     my($R, $V) = &get_tag("$l");
