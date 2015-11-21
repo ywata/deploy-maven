@@ -112,7 +112,6 @@ sub do_checkout_{
     if($?){
 	
     }
-    
 }
 
 sub do_deploy_{
@@ -356,7 +355,7 @@ sub get_dependencies{
     }
     while(<F>){
 	if(m|\INFO\] +((.+):(.+):(.+):(.+):(.+))|){
-	    print "### $_";
+#	    print "### $_";
 	    push @deps, $1;
 	}else{
 	    last;
