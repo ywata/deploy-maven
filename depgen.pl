@@ -148,15 +148,19 @@ sub do_build_{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
 
-    my @deps;
+    my %deps;
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-#	`mvn clean dependency:copy-dependencies package`;
 	&run_mvn("clean dependency:copy-dependencies package");
 	my @dp = &get_dependencies($d);
-	push @deps, @dp;
+	if(!defined($deps{$d})){
+	    $deps{$d} = \@dp;
+	}else{
+	    die "$d is already defined";
+	}
 	chdir $cwd || die "cd $cwd failed";
     }
+
     my($lib, $bin, $conf, $archive, $prod);
     my $prod = "usr/local/prod";
 
@@ -177,8 +181,9 @@ sub do_build_{
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");    
-    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", @dirs);
+    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
 }
+
 
 
 # host: chroot/archive.???.tar.gz 
@@ -245,9 +250,14 @@ END_OF_DEPLOY
 }
 
 sub create_archive{
-    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, $prod, @dirs)  = @_;
-    
+    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
+    my %deps = %$deps;
+
     foreach my $d (@dirs){
+	print "---> $deps{$d} @$deps{$d}\n";
+	my %artifacts = &pack_conv($d, @$deps{$d});
+	
+	
 	open(FIND, "find $d |") or die "find $d failed";
 	while(<FIND>){
 	    my($where, $dep, $name, $target);
@@ -259,17 +269,44 @@ sub create_archive{
 	    }elsif(m|(.+)/target/([^/]+\.jar)|){
 		($where, $dep, $name, $target) = ($1, 0, $2, $_);
 	    }else{
+#		print "Warning $_\n";
 		next;
 	    }
 	    my($w) = "$CHROOT/$lib/$where";
-	    if(! -d $w){
-		&install_dir($w);
+
+	    $target =~ m|([^/]+)$|;
+	    my $base = $1;
+	    if($artifacts{$base} eq "test"){
+		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
+	    }else{
+#		print "$target is OK $base $artifacts{$base}\n";
+		if(! -d $w){
+		    &install_dir($w);
+		}
+		&install_file($target, "$w/$name");
 	    }
-	    &install_file($target, "$w/$name");
 	}
 	close(FIND);
     }
     &archive_($CHROOT, $archive);
+}
+
+sub pack_conv{
+    my($d, @rest) = @_;
+    my(%r);
+    
+    print "pack_conv\n";
+    foreach my $s (@rest){
+	print @rest;
+	foreach my $l (@$s){
+	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l;
+	    print "$scope\n";
+	    my($target) = "$artId-$version.$packType";
+	    $r{$target} = $scope;
+	    print "$target -> $scope\n";
+	}
+    }
+    return %r;
 }
 
 sub run_mvn{
@@ -318,14 +355,15 @@ sub get_dependencies{
 	last if(m|^\[INFO\] The following files have been resolved:|);
     }
     while(<F>){
-	if(m|\INFO\] +(.+):(.+):(.+):(.+):(.+)|){
-	    push @deps, ($1, $2, $3, $4, $5);
+	if(m|\INFO\] +((.+):(.+):(.+):(.+):(.+))|){
+	    print "### $_";
+	    push @deps, $1;
 	}else{
 	    last;
 	}
     }
     close(F);
-    print "@deps \n";
+
     return @deps;
 }
 
