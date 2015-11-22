@@ -1,32 +1,38 @@
 #!/usr/bin/env perl
 
-@Bins = ("/bin/", "/usr/bin/");
-$TAR = "tar";
-$SVN = "svn";
-$RM  = "/bin/rm";
-$CURL = "curl";
-$INSTALL = "install";
+use strict;
+use strict "vars";
+use strict "refs";
+use strict "subs";
 
-$BINDIR = "$ENV{HOME}/bin_";
-$JAVA_HOME = "java_home";
-$MAVEN_VER = "3.3.3";
+#&install_setup;
+#exit 0;
 
-$BUILD_VERSION_FILE = ".build_version";
+my @Bins = ("/bin/", "/usr/bin/");
+my $TAR = "tar";
+my $SVN = "svn";
+my $RM  = "/bin/rm";
+my $CURL = "curl";
+my $INSTALL = "install";
 
-$CHROOT = "chroot";
+my $BINDIR = "$ENV{HOME}/bin_";
+my $JAVA_HOME = "java_home";
+my $MAVEN_VER = "3.3.3";
+my $BUILD_VERSION_FILE = ".build_version";
+my $CHROOT = "chroot";
+my $root = "root:wheel";
+
+my @install_params;
 
 $TAR = &findFile($TAR, @Bins);
 $SVN = &findFile($SVN, @Bins);
 $CURL = &findFile($CURL, @Bins);
 $INSTALL = &findFile($INSTALL, @Bins);
 
-$REMOTE = "remotehost:/home/users/";
+#$REMOTE = "remotehost:/home/users/";
     
-$build_started = `date "+%Y%m%d-%H%M"`;
-chomp($build_started);
-
-    
-chomp($cwd = `pwd`); # /bin/pwd
+chomp(my $build_started = `date "+%Y%m%d-%H%M"`);#chomp($build_started);
+chomp(my $cwd = `pwd`); # /bin/pwd
 
 # main function is command dispatcher
 &dispatch_(@ARGV);
@@ -95,7 +101,6 @@ args=\$*
 
 for opt in \$args; do
   case "\$opt" in
-    "--show-java-home") echo "/Users/ywata/bin_/$d"; exit 0;;
     "--show-mvn") echo "depgen.pl" ; exit 0;;
   esac
 done
@@ -135,7 +140,7 @@ sub do_build_{
     print STDERR "do_build_:@dirs\n";
 
 #    my($show_info) = `mvn --show-info`;
-    chomp($show_info);
+    chomp(my $show_info);
 
     $? = 0; # XXX
     if($?){
@@ -176,10 +181,10 @@ sub do_build_{
     }
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
-    &install_dir("$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
+    &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
-    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");    
+    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
     &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
 }
 
@@ -204,10 +209,7 @@ sub create_deploy_self_{
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_self.sh";
 
-    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
-    print S << "END_OF_DEPLOY";
-#!/bin/sh
-
+    my $content =  << "END_OF_DEPLOY";
 # The script runs on target server.
 
 top=test
@@ -217,6 +219,9 @@ sudo install -d $lib
 sudo install -d $bin
 sudo install -d $conf
 sudo tar xvzf \$HOME/$archive
+
+sudo $bin/ch.sh
+
 if [ -f $prod/lib ]; then
   sudo rm -f $prod/lib
 fi
@@ -224,8 +229,7 @@ fi
 sudo ln -s $lib $prod/lib
 
 END_OF_DEPLOY
-    close(S);
-    chmod 0755, "$CHROOT/$bin/$sh" or die "chmod $CHROOT/$bin/$sh failed. $cwd";
+    &create_script_("$CHROOT/$bin", $sh, $content);
 }
 
 sub create_deploy_one_{
@@ -233,10 +237,8 @@ sub create_deploy_one_{
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
     # This script runs on step server.
-    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
-    print S << "END_OF_DEPLOY";
-#!/bin/sh
-
+    #    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
+    my $content = <<"END_OF_DEPLOY";
 target_user=\$1
 target_host=\$2
 
@@ -244,8 +246,8 @@ scp $archive \$target_user\@\$target_host:$archive
 ssh \$target_user\@\$target_host tar xvzf $archive
 ssh -t \$target_user\@\$target_host $bin/deploy_self.sh 
 END_OF_DEPLOY
-    close(S);
-    chmod 0755, "$CHROOT/$bin/$sh" or die "chmod $sh failed";
+    print "$content";
+    &create_script_("$CHROOT/$bin", $sh, $content);
 }
 
 sub create_archive{
@@ -253,7 +255,7 @@ sub create_archive{
     my %deps = %$deps;
 
     foreach my $d (@dirs){
-	print "---> $deps{$d} @$deps{$d}\n";
+	print "---> @$deps{$d} @$deps{$d}\n";
 	my %artifacts = &pack_conv($d, @$deps{$d});
 	
 	
@@ -276,17 +278,20 @@ sub create_archive{
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
 	    if($artifacts{$base} eq "test"){
-		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
+#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
 #		print "$target is OK $base $artifacts{$base}\n";
 		if(! -d $w){
-		    &install_dir($w);
+		    &install_dir_($root, "0755", $w);
 		}
-		&install_file($target, "$w/$name");
+
+		&install_file_($root, "0644", "$w/$name", $target);
 	    }
 	}
 	close(FIND);
     }
+    &create_change_mode_owner_($bin, "ch.sh");
+    
     &archive_($CHROOT, $archive);
 }
 
@@ -327,26 +332,67 @@ sub archive_{
     chdir $cwd or die "cd $cwd";
 }
 
-sub install_file{
-    my($file, $dir, @opt) = @_;
-    &install_($file, $dir, @opt);
+
+sub install_opt{
+    my($owner, $mode) = @_;
+    my($o, $g) = split(/\:/, $owner);
+    my(@opt);
+
+    return @opt;
 }
 
+sub create_change_mode_owner_{
+    my($dir_sh, $sh) = @_;
+    my($content);
+
+    foreach my $p (@install_params){
+	my($owner, $mode, $path) = @$p;
+	$path =~ s|^$CHROOT||;
+
+	if($mode){
+	    $content .= "chmod $mode $path\n";
+	}
+	if($owner){
+	    $content .= "chown $owner $path\n";
+	}
+    }
+    &create_script_("$CHROOT/$dir_sh", $sh, $content);
+}
+
+# install_() is a bit tricky for supporting dir and file installation.
 sub install_{
-    my($file, $dir, @opt) = @_;
-    &run_("$INSTALL @opt $file $dir");
+    my($owner, $mode, $path, $file, @opt) = @_;
+    $owner =~ s/\:/./;
+    my(@r) = ($owner, $mode, $path);
+    push @install_params, \@r;
+
+
+    push @opt, &install_opt($owner, $mode);
+    if($file eq ""){
+	push @opt, " -d ";
+    }
+    my($inst) = "$INSTALL @opt $file $path";
+    &run_( $inst );
 }
 
-sub install_dir{
-    my(@dir) = @_;
+sub install_file_{
+    my($owner, $mode, $to, $from, @opt) = @_;
+
+    &install_($owner, $mode, $to, $from, @opt);
+}
+
+sub install_dir_{
+    my($owner, $mode, @dir) = @_;
+    my(@opt) = &install_opt($owner, $mode);
+
     foreach my $d (@dir){
-	&run_("$INSTALL -d $d");
+	&install_($owner, $mode, $d, "", @opt);
     }
 }
 
 sub get_dependencies{
     my(@deps);
-    open(F, "mvn dependency:list |") or die "$mvn failed";
+    open(F, "mvn dependency:list |") or die "mvn failed";
     if(! -f "pom.xml"){
 	die "No pom.xml found.";
     }
@@ -355,7 +401,6 @@ sub get_dependencies{
     }
     while(<F>){
 	if(m|\INFO\] +((.+):(.+):(.+):(.+):(.+))|){
-#	    print "### $_";
 	    push @deps, $1;
 	}else{
 	    last;
@@ -389,7 +434,7 @@ sub run_{
     my($command) = @_;
     `$command`;
     if($?){
-	die "$command failed";
+	die "\n$command failed";
     }
 }
 
@@ -443,6 +488,12 @@ sub create_script_{
     &mkdir_($d);
     my($f) = "$d/$file";
     open(SCRIPT, ">$f") or die "cannot create $f";
+
+    print SCRIPT << "BIN_SH";
+#!/bin/sh
+
+BIN_SH
+    
     print SCRIPT $script;
     close(SCRIPT);
 
@@ -509,11 +560,12 @@ sub writeVersion_{
 sub usage_{
     my($prog) = @_;
     print STDERR <<"END_OF_USAGE";
-usage:$prog setup jdk-id            # setup mvn & JAVA_HOME
+usage:$prog fetch                   # fetch jdk and apache-maven
+      $prog setup jdk-id            # setup mvn script for our build environemnt
       $prog checkout url            # checkout latest source from url
       $prog tag-checkout tag url    # checkout latest source from url with tag
       $prog rev-checkout rev url    # checkout latest source from url with rev
-      $prog build [dirs]            # build and archive files to transfer
+      $prog build [dirs]            # build and archive files in local directory
       $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
 
       $prog get-license dir [dirs]
@@ -521,6 +573,23 @@ END_OF_USAGE
 
     exit 1;
 }
+
+
+
+sub install_setup{
+    while(<DATA>){
+	next if(m|^#|);
+	next if(m|^(s*)$|);
+	my($path, $o_g, $perm) = split /\s+/;
+	print "$path --> $o_g --> $perm\n";
+
+	
+    }
+}
+
 __END__
+#directory owner.group permission 
+/usr/local/prod/             root.root        0755
+
 
 
