@@ -23,6 +23,7 @@ my $CHROOT = "chroot";
 my $root = "root:wheel";
 
 my @install_params;
+my @replace_file;   # fileName -> ref of s/// commands array.
 
 $TAR = &findFile($TAR, @Bins);
 $SVN = &findFile($SVN, @Bins);
@@ -42,8 +43,8 @@ sub dispatch_{
     my($command) = shift @argv; # 
     my($r);
     
-    print "ARGV:@ARGV \n";
-    print "argv:@argv \n";
+#    print "ARGV:@ARGV \n";
+#    print "argv:@argv \n";
     
     if($ARGV[0] eq "setup"){
 	&do_setup_(@argv);
@@ -52,13 +53,23 @@ sub dispatch_{
 	&fetch("http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz", 
 	       "Cookie: oraclelicense=accept-securebackup-cookie");
 	&fetch("http://ftp.yz.yamagata-u.ac.jp/pub/network/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz")
+    }elsif(($ARGV[0] eq "tag")){
+	&do_tag_(@argv);
     }elsif(($ARGV[0] eq "checkout")){
 	&writeVersion_($BUILD_VERSION_FILE, "", "");
 	&do_checkout_("checkout", @argv);
     }elsif(($ARGV[0] eq "tag-checkout")){
-	die "tag-checkout currently not supported.";
+	# tag URL
+	
+	if($ARGV[2] =~ m|tags/$ARGV[1]/|){ # We assume standard SVN layout.
+	    
+	}else{
+	    die "tag name and URL does not match. $ARGV[1] $ARGV[2]"
+	}
+	
 	&writeVersion_($BUILD_VERSION_FILE, "tag", $argv[0]);
-	my($opt) = " checkout" . shift @argv;
+	my($opt) = " checkout ";
+	shift @argv;
 	&do_checkout_($opt, @argv);
     }elsif(($ARGV[0] eq "rev-checkout")){
 	&writeVersion_($BUILD_VERSION_FILE, "rev", $argv[0]);
@@ -74,8 +85,19 @@ sub dispatch_{
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
 	
+    }elsif($ARGV[0] eq "help"){
+	print STDERR <<"HELP";
+
+Running this program might need some additional settings.
+- \$PATH environment variable should contain $BINDIR
+- https_proxy environment variable should be set if necessary.(I.e, if you are behind firewall.)
+- \$HOME/.m2/settings.xml should be setup if necessary.
+
+HELP
+	&usage_();
     }elsif($ARGV[0] eq "purge"){
 	&do_purge_checkout_(@argv);
+
     }else{
 	&usage_();
     }
@@ -113,6 +135,7 @@ END_OF_MVN
 
 sub do_checkout_{
     my($opt, @argv) = @_;
+#    print "$SVN $opt @argv\n";
     `$SVN $opt @argv`;
     if($?){
 	
@@ -120,6 +143,32 @@ sub do_checkout_{
 }
 
 sub do_deploy_{
+    my($tag, $ver, $archive, $step_user, $step_host, @configs) = @_;
+
+    my(@path) = split /\//, $archive;
+
+    
+    if(-f $archive ){
+	&run_("scp $archive $step_user\@$step_host:");
+    }else{
+	die "$archive not found.";
+    }
+    &ssh_("rm -rf usr", "", $step_user, $step_host);
+    &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
+    
+    foreach my $repfile (@configs){
+	my($user, $host, $root, %rep_info) = &init_replace($repfile);
+
+	my $script = &create_replace_script_($host, %rep_info);
+	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
+	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script.sh", "-t", $step_user, $step_host);
+    }
+
+    
+    
+}
+
+sub do_deploy_old{
     my($tag, $ver, $file, $step_user, $step_host, $target_user, @hosts) = @_;
     my(@path) = split /\//, $file;
 
@@ -131,7 +180,7 @@ sub do_deploy_{
     &ssh_("rm -rf usr", "", $step_user, $step_host);
     &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
     foreach my $h (@hosts){
-	&ssh_("usr/local/prod/bin/deploy_one.sh $target_user $h", "-t", $step_user, $step_host);
+	&ssh_("usr/local/prod/bin/deploy_one.sh $target_user $h top script", "-t", $step_user, $step_host);
     }
 }
 
@@ -211,14 +260,21 @@ sub create_deploy_self_{
 
     my $content =  << "END_OF_DEPLOY";
 # The script runs on target server.
+user=\$1
+top=\$2
+rep_script=\$3
 
-top=test
-mkdir \$top
+if [ ! -d \$top ]; then
+  mkdir \$top
+fi
 cd \$top
 sudo install -d $lib
 sudo install -d $bin
 sudo install -d $conf
-sudo tar xvzf \$HOME/$archive
+
+# This is very dangerous.
+sudo tar xvzf \$user/$archive #\$HOME?
+sudo \$user/\$rep_script
 
 sudo $bin/ch.sh
 
@@ -232,21 +288,33 @@ END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
 }
 
+sub do_tag_{
+    my($old, $new);
+    my($message) = <<"MESSAGE";
+Creating tag is as follows.
+svn copy url1 url2
+
+MESSAGE
+    die $message . "do_tag_ currently not implemented";
+}
+
 sub create_deploy_one_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
     # This script runs on step server.
-    #    open(S, ">$CHROOT/$bin/$sh") or die "cannot create $CHROOT/$bin/$sh $cwd";
     my $content = <<"END_OF_DEPLOY";
 target_user=\$1
 target_host=\$2
+target_top=\$3
+rep_script=\$4
 
 scp $archive \$target_user\@\$target_host:$archive
 ssh \$target_user\@\$target_host tar xvzf $archive
-ssh -t \$target_user\@\$target_host $bin/deploy_self.sh 
+scp \$rep_script \$target_user\@\$target_host:usr
+ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \\~\$target_user \$target_top \$rep_script
 END_OF_DEPLOY
-    print "$content";
+#    print "$content";
     &create_script_("$CHROOT/$bin", $sh, $content);
 }
 
@@ -255,12 +323,12 @@ sub create_archive{
     my %deps = %$deps;
 
     foreach my $d (@dirs){
-	print "---> @$deps{$d} @$deps{$d}\n";
+#	print "---> @$deps{$d} @$deps{$d}\n";
 	my %artifacts = &pack_conv($d, @$deps{$d});
 	
 	
-	open(FIND, "find $d |") or die "find $d failed";
-	while(<FIND>){
+	open(my $FIND, "find $d |") or die "find $d failed";
+	while(<$FIND>){
 	    my($where, $dep, $name, $target);
 	    chomp;
 	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
@@ -288,7 +356,7 @@ sub create_archive{
 		&install_file_($root, "0644", "$w/$name", $target);
 	    }
 	}
-	close(FIND);
+	close($FIND);
     }
     &create_change_mode_owner_($bin, "ch.sh");
     
@@ -299,15 +367,15 @@ sub pack_conv{
     my($d, @rest) = @_;
     my(%r);
     
-    print "pack_conv\n";
+#    print "pack_conv\n";
     foreach my $s (@rest){
-	print @rest;
+#	print @rest;
 	foreach my $l (@$s){
 	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l;
-	    print "$scope\n";
+#	    print "$scope\n";
 	    my($target) = "$artId-$version.$packType";
 	    $r{$target} = $scope;
-	    print "$target -> $scope\n";
+#	    print "$target -> $scope\n";
 	}
     }
     return %r;
@@ -343,7 +411,7 @@ sub install_opt{
 
 sub create_change_mode_owner_{
     my($dir_sh, $sh) = @_;
-    my($content);
+    my($content, $annotation);
 
     foreach my $p (@install_params){
 	my($owner, $mode, $path) = @$p;
@@ -355,8 +423,10 @@ sub create_change_mode_owner_{
 	if($owner){
 	    $content .= "chown $owner $path\n";
 	}
+	$annotation .= "#$path $owner $mode\n";
+	
     }
-    &create_script_("$CHROOT/$dir_sh", $sh, $content);
+    &create_script_("$CHROOT/$dir_sh", $sh, $content . $annotation);
 }
 
 # install_() is a bit tricky for supporting dir and file installation.
@@ -392,21 +462,21 @@ sub install_dir_{
 
 sub get_dependencies{
     my(@deps);
-    open(F, "mvn dependency:list |") or die "mvn failed";
+    open(my $F, "mvn dependency:list |") or die "mvn failed";
     if(! -f "pom.xml"){
 	die "No pom.xml found.";
     }
-    while(<F>){
+    while(<$F>){
 	last if(m|^\[INFO\] The following files have been resolved:|);
     }
-    while(<F>){
+    while(<$F>){
 	if(m|\INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 	    push @deps, $1;
 	}else{
 	    last;
 	}
     }
-    close(F);
+    close($F);
 
     return @deps;
 }
@@ -423,11 +493,11 @@ sub ssh__{
     my($user, $host, $command, @opt) = @_;
     #    print "ssh $host $command @opt\n";
     print STDERR "ssh $user\@$host $command @opt\n";
-    open(SSH, "ssh @opt $user\@$host $command |") or die "ssh $host $command failed";
-    while(<SSH>){
+    open(my $SSH, "ssh @opt $user\@$host $command |") or die "ssh $host $command failed";
+    while(<$SSH>){
 	print;
     }
-    close(SSH);
+    close($SSH);
 }
 
 sub run_{
@@ -442,14 +512,14 @@ sub untar_{
     my($dir, $tgz) = @_;
 
     chdir $dir || die "cd $dir failed";
-    open(TAR, "$TAR xvzf $cwd/$tgz 2>&1 |") or die $!;
+    open(my $TAR, "$TAR xvzf $cwd/$tgz 2>&1 |") or die $!;
     my $top;
-    while(<TAR>){
+    while(<$TAR>){
 	if(m/^(x )?([^\/]+)/){
 	    $top = $2;
 	}
     }
-    close(TAR);
+    close($TAR);
 
     if($top ne ""){
 	chdir $cwd || die "cd $dir failed";
@@ -487,15 +557,15 @@ sub create_script_{
     my($d, $file, $script) = @_;
     &mkdir_($d);
     my($f) = "$d/$file";
-    open(SCRIPT, ">$f") or die "cannot create $f";
+    open(my $SCRIPT, ">$f") or die "cannot create $f";
 
-    print SCRIPT << "BIN_SH";
+    my $head = <<"BIN_SH";
 #!/bin/sh
 
 BIN_SH
     
-    print SCRIPT $script;
-    close(SCRIPT);
+    print $SCRIPT "$head$script";
+    close($SCRIPT);
 
     my($mode) = 0755;
     chmod $mode, $f || die "chmod $f failed";
@@ -542,9 +612,9 @@ sub fetch{
 
 sub readVersion_{
     my($f) = @_;
-    open(F, "$f") or &get_tag(":");
-    my($l) = <F>;
-    close(F);
+    open(my $F, "$f") or &get_tag(":");
+    my($l) = <$F>;
+    close($F);
     my($R, $V) = &get_tag("$l");
     return($R, $V);
 }
@@ -552,10 +622,124 @@ sub writeVersion_{
     my($f, $r, $v) = @_;
 
     my($R, $V) = &get_tag("$r:$v");
-    open(F, ">$f") or die "cannot create $f";
-    print F "$R:$V";
-    close(F);
+    open(my $F, ">$f") or die "cannot create $f";
+    print $F "$R:$V";
+    close($F);
 }
+
+
+
+sub install_setup{
+    while(<DATA>){
+	next if(m|^#|);
+	next if(m|^(s*)$|);
+	my($path, $o_g, $perm) = split /\s+/;
+#	print "$path --> $o_g --> $perm\n";
+    }
+}
+
+sub read_replacements{
+    my($handle) = @_;
+    my $target = "";
+    while(<$handle>){
+	# first, search [???] line.
+	if(m|^\[(.+)\]|){
+	    $target = $1;
+	    last;
+	}
+    }
+    if($target eq ""){
+	return (); # almost end of file
+    }
+    
+    my @list;
+    while(<$handle>){
+	chomp;
+	next if(m|^#|);
+	last if(m|^$|);
+	push @list, $_;
+
+    }
+    return ($target, \@list);
+}
+
+sub init_replace{
+    my($file) = @_;
+    my %reps;
+    open(my $F, $file) or die "Cannot open $file.";
+    my($user, $host, $root) = &read_remote($F);
+    
+    while(!eof($F)){
+	my ($target, $reps) = &read_replacements($F);
+	if(defined($reps{$target})){
+	    die "file duplication in $file";
+	}
+	if($target ne ""){
+	    $reps{$target} = $reps;
+	}
+    }
+    close($F);
+    return ($user, $host, $root, %reps);
+}
+
+sub read_remote{
+    my($F) = @_;
+    my(%global);
+    while(<$F>){
+	next if(m|^#|);
+	last if(m|^$|);
+	
+	my($key, $val) = split /:/, $_;
+	chomp $val;
+	$global{$key} = $val;
+    }
+    if($global{"User"} eq ""){
+	die "User not defiend in config file";
+    }
+    if($global{"Host"} eq ""){
+	die "Host not defiend in config file";
+    }
+    if($global{"Root"} eq ""){
+	die "Root not defiend in config file";
+    }
+    
+    return ($global{"User"}, $global{"Host"}, $global{"Root"});
+}
+
+
+sub replace_script_{
+    my($file, @rest) = @_;
+    print "$file\n";
+    
+    my($content);
+    foreach my $rep (@rest){
+	my($left, $right) = split(/-->/, $rep);
+	if($right eq ""){
+	    die "config file format error $rep";
+	}else{
+	    $content .= "s|^$left\$|$right|;"
+	}
+    }
+    return <<"END_OF_SCRIPT";
+f=\`mktemp tmp.XXXXX\`
+sed -e \'$content \' $file > \$f
+mv \$f $file;
+END_OF_SCRIPT
+}
+
+# Needs some investigation for security.
+sub create_replace_script_{
+    my($host, %reps) = @_;
+    my($content);
+    foreach my $f (keys %reps){
+	my($x) = $reps{$f};
+	$content .= &replace_script_($f, @$x);
+    }
+
+    &create_script_($CHROOT, "$host.sh", $content);
+    return "$host.sh";
+}
+
 
 sub usage_{
     my($prog) = @_;
@@ -566,30 +750,18 @@ usage:$prog fetch                   # fetch jdk and apache-maven
       $prog tag-checkout tag url    # checkout latest source from url with tag
       $prog rev-checkout rev url    # checkout latest source from url with rev
       $prog build [dirs]            # build and archive files in local directory
-      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
+#      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
+      $prog deploy  rchive-file staging-user staging-host [configs]
 
-      $prog get-license dir [dirs]
+      $prog help
 END_OF_USAGE
 
     exit 1;
 }
 
-
-
-sub install_setup{
-    while(<DATA>){
-	next if(m|^#|);
-	next if(m|^(s*)$|);
-	my($path, $o_g, $perm) = split /\s+/;
-	print "$path --> $o_g --> $perm\n";
-
-	
-    }
-}
+    
+    
 
 __END__
 #directory owner.group permission 
 /usr/local/prod/             root.root        0755
-
-
-
