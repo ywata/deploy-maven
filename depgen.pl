@@ -4,6 +4,7 @@ use strict;
 use strict "vars";
 use strict "refs";
 use strict "subs";
+use warnings;
 
 #&install_setup;
 #exit 0;
@@ -159,9 +160,10 @@ sub do_deploy_{
     foreach my $repfile (@configs){
 	my($user, $host, $root, %rep_info) = &init_replace($repfile);
 
+	print "@@@@@@@@ $host\n";
 	my $script = &create_replace_script_($host, %rep_info);
 	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
-	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script.sh", "-t", $step_user, $step_host);
+	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script", "-t", $step_user, $step_host);
     }
 
     
@@ -202,6 +204,7 @@ sub do_build_{
     }
 
     my %deps;
+
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
 	&run_mvn("clean dependency:copy-dependencies package");
@@ -214,7 +217,10 @@ sub do_build_{
 	chdir $cwd || die "cd $cwd failed";
     }
 
-    my($lib, $bin, $conf, $archive, $prod);
+    my @confs = &get_confs(@dirs);
+
+
+    my($lib, $bin, $conf, $archive);
     my $prod = "usr/local/prod";
 
     if($ver eq ""){
@@ -231,10 +237,13 @@ sub do_build_{
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
+    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
+    
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
-    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
+#    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
+    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
 }
 
 
@@ -264,6 +273,9 @@ user=\$1
 top=\$2
 rep_script=\$3
 
+
+echo "\$1 \$2 \$3"
+
 if [ ! -d \$top ]; then
   mkdir \$top
 fi
@@ -276,7 +288,7 @@ sudo install -d $conf
 sudo tar xvzf \$user/$archive #\$HOME?
 sudo \$user/\$rep_script
 
-sudo $bin/ch.sh
+sudo $bin/ch.sh \$top
 
 if [ -f $prod/lib ]; then
   sudo rm -f $prod/lib
@@ -310,7 +322,7 @@ target_top=\$3
 rep_script=\$4
 
 scp $archive \$target_user\@\$target_host:$archive
-ssh \$target_user\@\$target_host tar xvzf $archive
+ssh -t \$target_user\@\$target_host tar xvzf $archive
 scp \$rep_script \$target_user\@\$target_host:usr
 ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \\~\$target_user \$target_top \$rep_script
 END_OF_DEPLOY
@@ -319,7 +331,7 @@ END_OF_DEPLOY
 }
 
 sub create_archive{
-    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
+    my($tag, $ver, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
     my %deps = %$deps;
 
     foreach my $d (@dirs){
@@ -412,21 +424,23 @@ sub install_opt{
 sub create_change_mode_owner_{
     my($dir_sh, $sh) = @_;
     my($content, $annotation);
+    $content = <<"END";
+top=\$1
+END
 
     foreach my $p (@install_params){
 	my($owner, $mode, $path) = @$p;
 	$path =~ s|^$CHROOT||;
 
 	if($mode){
-	    $content .= "chmod $mode $path\n";
+	    $content .= "echo \$top$path\n";
+	    $content .= "chmod $mode \$top$path\n";
 	}
 	if($owner){
-	    $content .= "chown $owner $path\n";
+	    $content .= "chown $owner \$top$path\n";
 	}
-	$annotation .= "#$path $owner $mode\n";
-	
     }
-    &create_script_("$CHROOT/$dir_sh", $sh, $content . $annotation);
+    &create_script_("$CHROOT/$dir_sh", $sh, $content);
 }
 
 # install_() is a bit tricky for supporting dir and file installation.
@@ -460,6 +474,46 @@ sub install_dir_{
     }
 }
 
+sub install_files_{
+    my($owner, $mode, $dir, @confs) = @_;
+    foreach my $f (@confs){
+	&install_file_($owner, $mode, $dir, $f);
+    }
+}
+
+
+
+sub get_conf{
+    my($dir) = @_;
+    my @confs;
+    open(my $FIND, "find $dir -type d -name conf |") or die "find failed for open";
+    while(my $l = <$FIND>){
+	chomp $l;
+	my $c = $l;
+	$c =~ s/conf$//;
+	if( -f "$c/pom.xml"){
+	    open(my $F, "find $l -type f |") or die "find failed for open";
+	    while(my $f = <$F>){
+		chomp $f;
+		push @confs, $f;
+	    }
+	    close($F);
+	}
+    }
+    close($FIND);
+    return \@confs;
+}
+
+sub get_confs{
+    my(@dirs) = @_;
+    my @confs;
+    foreach my $d (@dirs){
+	my $confs = &get_conf($d);
+	push @confs, @$confs;
+    }
+    return @confs;
+}
+
 sub get_dependencies{
     my(@deps);
     open(my $F, "mvn dependency:list |") or die "mvn failed";
@@ -470,7 +524,7 @@ sub get_dependencies{
 	last if(m|^\[INFO\] The following files have been resolved:|);
     }
     while(<$F>){
-	if(m|\INFO\] +((.+):(.+):(.+):(.+):(.+))|){
+	if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 	    push @deps, $1;
 	}else{
 	    last;
@@ -667,7 +721,7 @@ sub init_replace{
     my($file) = @_;
     my %reps;
     open(my $F, $file) or die "Cannot open $file.";
-    my($user, $host, $root) = &read_remote($F);
+    my($user, $host, $top) = &read_remote($F);
     
     while(!eof($F)){
 	my ($target, $reps) = &read_replacements($F);
@@ -679,7 +733,7 @@ sub init_replace{
 	}
     }
     close($F);
-    return ($user, $host, $root, %reps);
+    return ($user, $host, $top, %reps);
 }
 
 sub read_remote{
@@ -709,8 +763,8 @@ sub read_remote{
 
 sub replace_script_{
     my($file, @rest) = @_;
-    print "$file\n";
-    
+
+    print "=======$file\n";
     my($content);
     foreach my $rep (@rest){
 	my($left, $right) = split(/-->/, $rep);
@@ -733,6 +787,7 @@ sub create_replace_script_{
     my($content);
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
+	print "%%%%%%%% $f\n";
 	$content .= &replace_script_($f, @$x);
     }
 
@@ -763,5 +818,17 @@ END_OF_USAGE
     
 
 __END__
-#directory owner.group permission 
-/usr/local/prod/             root.root        0755
+#config file
+User:
+Host:
+Root:
+
+[file1]
+string--->replacement
+
+[file2]
+string--->replacement
+
+
+
+
