@@ -145,27 +145,27 @@ sub do_checkout_{
 }
 
 sub do_transfer_{
-    my($tag, $ver, $archive, $step_user, $step_host) = @_;
+    my($tag, $ver, $archive, $staging_user, $staging_host) = @_;
     my(@path) = split /\//, $archive;
     
     if(-f $archive ){
-	&run_("scp $archive $step_user\@$step_host:");
+	&run_("scp $archive $staging_user\@$staging_host:");
     }else{
 	die "$archive not found.";
     }
-    &ssh_("rm -rf usr", "", $step_user, $step_host);
-    &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
+    &ssh_("rm -rf usr", "", $staging_user, $staging_host);
+    &ssh_("tar xvzf $path[-1]", "", $staging_user, $staging_host);
 }
 
 sub do_deploy_{
-    my($step_user, $step_host, @configs) = @_;
+    my($staging_user, $staging_host, @configs) = @_;
 
     foreach my $repfile (@configs){
 	my($user, $host, $top, %rep_info) = &init_replace($repfile);
 
 	my $script = &create_replace_script_($host, %rep_info);
-	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
-	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $step_user, $step_host);
+	&run_("scp $CHROOT/$script $staging_user\@$staging_host:usr/");
+	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $staging_user, $staging_host);
     }
     
 }
@@ -304,7 +304,7 @@ sub create_deploy_one_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
-    # This script runs on step server.
+    # This script runs on staging server.
     my $content = <<"END_OF_DEPLOY";
 target_user=\$1
 target_host=\$2
