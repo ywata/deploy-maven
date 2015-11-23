@@ -82,14 +82,16 @@ sub dispatch_{
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
-	
+	die "not implemented"
     }elsif($ARGV[0] eq "help"){
 	print STDERR <<"HELP";
 
-Running this program might need some additional settings.
+Running this program might need some settings:
 - \$PATH environment variable should contain $BINDIR
 - https_proxy environment variable should be set if necessary.(I.e, if you are behind firewall.)
 - \$HOME/.m2/settings.xml should be setup if necessary.
+- SSH authorization_key setting may reduce password input.
+
 
 HELP
 	&usage_();
