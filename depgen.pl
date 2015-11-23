@@ -267,26 +267,22 @@ user=\$1
 top=\$2
 rep_script=\$3
 
+echo "\$user \$top \$rep_script"
+
 mkdir \$top
-cd \$top
 
-su - \$user
+home="~\$user"
+sudotar="sudo tar xozf \$home/$archive -C \$top"
+eval \$sudotar   # be careful not to supply unnecessary thing
 
-# This is very dangerous.
-#sudo tar xvzf \$user/$archive #\$HOME?
-#sudo \$user/\$rep_script
-tar xvzf \$user/$archive #\$HOME?
-\$user/\$rep_script
-
-#sudo $bin/ch.sh \$top
+sudo \$rep_script \$top
+sudo $bin/ch.sh \$top
 
 if [ -L $prod/lib ]; then
-#  sudo rm -f $prod/lib
-  rm -f $prod/lib
+  sudo m -f $prod/lib
 fi
 
-#sudo ln -s $lib $prod/lib
-ln -s $lib $prod/lib
+sudo ln -s $lib $prod/lib
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -327,7 +323,7 @@ rep_script=\$4
 scp $archive \$target_user\@\$target_host:$archive
 ssh -t \$target_user\@\$target_host tar xvzf $archive
 scp \$rep_script \$target_user\@\$target_host:usr
-ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \\~\$target_user \$target_top \$rep_script
+ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \$target_user \$target_top \$rep_script
 END_OF_DEPLOY
 #    print "$content";
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -436,10 +432,10 @@ END
 	$path =~ s|^$CHROOT||;
 #	print "@$p \n";
 	if($mode){
-	    $content .= "chmod $mode ./$path\n";
+	    $content .= "chmod $mode \$top/$path\n";
 	}
 	if($owner){
-	    $content .= "chown $owner ./$path\n";
+	    $content .= "chown $owner \$top/$path\n";
 	}
     }
     &create_script_("$CHROOT/$dir_sh", $sh, $content);
@@ -783,7 +779,7 @@ top=\$1
 
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
-mv \$f $to;
+mv \$f $to
 END_OF_SCRIPT
 }
 
