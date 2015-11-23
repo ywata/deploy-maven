@@ -40,7 +40,10 @@ sub dispatch_{
     my($r);
     
 #    print "ARGV:@ARGV \n";
-#    print "argv:@argv \n";
+    #    print "argv:@argv \n";
+    if(!defined($ARGV[0])){
+	$ARGV[0] = ""; # to suppress warnings.
+    }
     
     if($ARGV[0] eq "setup"){
 	&do_setup_(@argv);
@@ -94,12 +97,12 @@ Running this program might need some settings:
 
 
 HELP
-	&usage_();
+	&usage_($0);
     }elsif($ARGV[0] eq "purge"){
 	&do_purge_checkout_(@argv);
 
     }else{
-	&usage_();
+	&usage_($0);
     }
 }
 
@@ -199,7 +202,7 @@ sub do_build_{
 	chdir $cwd || die "cd $cwd failed";
     }
 
-    print ">>>>>>>@dirs \n";
+#    print ">>>>>>>@dirs \n";
     my @confs = &get_confs("conf", @dirs);
 
 
@@ -382,7 +385,7 @@ sub pack_conv{
 
 sub run_mvn{
     my($opt) = @_;
-    my($mvn) = "mvn $opt 2>1 ";
+    my($mvn) = "mvn $opt 2>&1 ";
     my $res = `$mvn`;
 #    my @res = split(/\n/, $res);
 
@@ -394,7 +397,7 @@ sub run_mvn{
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
-    &run_("$TAR cvzf $archive usr");
+    &run_("$TAR cvzf $archive usr 2>&1 ");
     
     chdir $cwd or die "cd $cwd";
 }
@@ -418,7 +421,7 @@ END
     foreach my $p (@install_params){
 	my($owner, $mode, $path) = @$p;
 	$path =~ s|^$CHROOT||;
-	print "@$p \n";
+#	print "@$p \n";
 	if($mode){
 	    $content .= "chmod $mode ./$path\n";
 	}
@@ -434,7 +437,7 @@ sub install_{
     my($owner, $mode, $from, $to, @opt) = @_;
     $owner =~ s/\:/./;
     my(@r) = ($owner, $mode, $to);
-    print "#### @r\n";
+#    print "#### @r\n";
     push @install_params, \@r;
 
     push @opt, &install_opt($owner, $mode);
@@ -442,7 +445,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-    print "$inst\n";
+#    print "$inst\n";
     &run_($inst);
 }
 
