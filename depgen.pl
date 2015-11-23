@@ -6,9 +6,6 @@ use strict "refs";
 use strict "subs";
 use warnings;
 
-#&install_setup;
-#exit 0;
-
 my @Bins = ("/bin/", "/usr/bin/");
 my $TAR = "tar";
 my $SVN = "svn";
@@ -77,11 +74,11 @@ sub dispatch_{
     }elsif(($ARGV[0] eq "build")){
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
-    }elsif(($ARGV[0] eq "deploy")){
+    }elsif(($ARGV[0] eq "transfer")){
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_transfer_($t, $v, @argv);
-    }elsif(($ARGV[0] eq "transfer")){
-	&do_depoy_(@argv);
+    }elsif(($ARGV[0] eq "deploy")){
+	&do_deploy_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
@@ -110,8 +107,7 @@ sub do_setup_{
     if(! -d $BINDIR){
 	mkdir $BINDIR or die "$BINDIR creation failed";
     }
-    
-    
+        
     my $j = &untar_($BINDIR, $jdk);
     my $m = &untar_($BINDIR, $maven);
 
@@ -143,7 +139,7 @@ sub do_checkout_{
     }
 }
 
-sub do_trasfer_{
+sub do_transfer_{
     my($tag, $ver, $archive, $step_user, $step_host) = @_;
     my(@path) = split /\//, $archive;
     
@@ -160,11 +156,11 @@ sub do_deploy_{
     my($step_user, $step_host, @configs) = @_;
 
     foreach my $repfile (@configs){
-	my($user, $host, $root, %rep_info) = &init_replace($repfile);
+	my($user, $host, $top, %rep_info) = &init_replace($repfile);
 
 	my $script = &create_replace_script_($host, %rep_info);
 	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
-	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script", " -t ", $step_user, $step_host);
+	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $step_user, $step_host);
     }
     
 }
@@ -229,8 +225,6 @@ sub do_build_{
     &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
 }
 
-
-
 # host: chroot/archive.???.tar.gz 
 # step server: $HOME/archive.???.tar.gz
 #                   usr/local/prod/bin
@@ -289,6 +283,16 @@ svn copy url1 url2
 
 MESSAGE
     die $message . "do_tag_ currently not implemented";
+}
+
+sub create_purge_{
+    my $content = <<"END_OF_PURGE";
+target_user=\$1
+target_host=\$2
+target_top=\$3
+
+find usr -type f | sed -e 's/^/\$target_top\//' |ssh -t \$target_user\@\$target_host sudo xargs rm -f
+END_OF_PURGE
 }
 
 sub create_deploy_one_{
@@ -364,7 +368,7 @@ sub pack_conv{
     foreach my $s (@rest){
 #	print @rest;
 	foreach my $l (@$s){
-	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l;
+	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l; #/
 #	    print "$scope\n";
 	    my($target) = "$artId-$version.$packType";
 	    $r{$target} = $scope;
@@ -467,33 +471,6 @@ sub install_files_{
 }
 
 
-# sub install_dir_{
-#     my($owner, $mode, @dir) = @_;
-#     my(@opt) = &install_opt($owner, $mode);
-
-#     foreach my $d (@dir){
-# 	&install_($owner, $mode, $d, "", @opt);
-#     }
-# }
-
-# sub install_file_{
-#     my($owner, $mode, $to, $from, @opt) = @_;
-
-#     &install_($owner, $mode, $to, $from, @opt);
-# }
-
-# sub install_files_{
-#     my($owner, $mode, $dir, @confs) = @_;
-#     print ">>> $owner $mode $dir --- @confs\n";
-#     &install_dir_($owner, "0755", $dir);
-#     foreach my $f (@confs){
-# 	print "==== $dir $f\n";
-# 	&install_file_($owner, "1111", $dir, $f);
-#     }
-#}
-
-
-
 sub get_conf{
     my($conf, $dir) = @_;
     my @confs;
@@ -592,8 +569,6 @@ sub untar_{
     }else{
 	die "no contents found in $tgz";
     }
-    
-    
 }
 
 sub get_tag{
@@ -754,7 +729,7 @@ sub read_remote{
 	next if(m|^#|);
 	last if(m|^$|);
 	
-	my($key, $val) = split /:/, $_;
+	my($key, $val) = split qw(:), $_;
 	chomp $val;
 	$global{$key} = $val;
     }
@@ -810,23 +785,21 @@ sub create_replace_script_{
 sub usage_{
     my($prog) = @_;
     print STDERR <<"END_OF_USAGE";
-usage:$prog fetch                   # fetch jdk and apache-maven
-      $prog setup jdk-id            # setup mvn script for our build environemnt
-      $prog checkout url            # checkout latest source from url
-      $prog tag-checkout tag url    # checkout latest source from url with tag
-      $prog rev-checkout rev url    # checkout latest source from url with rev
-      $prog build [dirs]            # build and archive files in local directory
-#      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
-      $prog trasfer rchive-file staging-user staging-host
-      $prog deploy staging-user staging-host [configs]
-
+usage:$prog fetch                           # fetch jdk and apache-maven
+      $prog setup jdk.tar.gz maven.tar.gz   # setup mvn script for our build environemnt
+      $prog checkout url                    # checkout latest source from url
+      $prog tag-checkout tag url            # checkout latest source from url with tag
+      $prog rev-checkout rev url            # checkout latest source from url with rev
+      $prog build [dirs]                    # build and archive files in local directory
+      $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
+      $prog deploy staging-user staging-host [configs]        # deploy files on hosts
+      $prog create-table staging-user staging-host [configs]  # currently not implemented
+      $prog upload-table staging-user staging-host [configs]  # currently not implemented
       $prog help
 END_OF_USAGE
 
     exit 1;
 }
-
-    
     
 
 __END__
