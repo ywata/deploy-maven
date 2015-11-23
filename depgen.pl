@@ -21,7 +21,7 @@ my $JAVA_HOME = "java_home";
 my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
 my $CHROOT = "chroot";
-my $root = "root:wheel";
+my $root = "bitnami.bitnami";
 
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
@@ -31,8 +31,6 @@ $SVN = &findFile($SVN, @Bins);
 $CURL = &findFile($CURL, @Bins);
 $INSTALL = &findFile($INSTALL, @Bins);
 
-#$REMOTE = "remotehost:/home/users/";
-    
 chomp(my $build_started = `date "+%Y%m%d-%H%M"`);#chomp($build_started);
 chomp(my $cwd = `pwd`); # /bin/pwd
 
@@ -145,9 +143,7 @@ sub do_checkout_{
 
 sub do_deploy_{
     my($tag, $ver, $archive, $step_user, $step_host, @configs) = @_;
-
     my(@path) = split /\//, $archive;
-
     
     if(-f $archive ){
 	&run_("scp $archive $step_user\@$step_host:");
@@ -160,38 +156,20 @@ sub do_deploy_{
     foreach my $repfile (@configs){
 	my($user, $host, $root, %rep_info) = &init_replace($repfile);
 
-	print "@@@@@@@@ $host\n";
 	my $script = &create_replace_script_($host, %rep_info);
 	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
 	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script", "-t", $step_user, $step_host);
     }
-
-    
-    
 }
 
-sub do_deploy_old{
-    my($tag, $ver, $file, $step_user, $step_host, $target_user, @hosts) = @_;
-    my(@path) = split /\//, $file;
-
-    if(-f $file ){
-	&run_("scp $file $step_user\@$step_host:");
-    }else{
-	die "$file not found.";
-    }
-    &ssh_("rm -rf usr", "", $step_user, $step_host);
-    &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
-    foreach my $h (@hosts){
-	&ssh_("usr/local/prod/bin/deploy_one.sh $target_user $h top script", "-t", $step_user, $step_host);
-    }
-}
 
 sub do_build_{
     my($tag, $ver, @dirs) = @_; 
     print STDERR "do_build_:@dirs\n";
 
 #    my($show_info) = `mvn --show-info`;
-    chomp(my $show_info);
+#    chomp($show_info);
+    my($show_info) = "";
 
     $? = 0; # XXX
     if($?){
@@ -239,10 +217,8 @@ sub do_build_{
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
     &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
-    
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
-#    &create_archive($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
     &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
 }
 
@@ -273,16 +249,8 @@ user=\$1
 top=\$2
 rep_script=\$3
 
-
-echo "\$1 \$2 \$3"
-
-if [ ! -d \$top ]; then
-  mkdir \$top
-fi
+mkdir \$top
 cd \$top
-sudo install -d $lib
-sudo install -d $bin
-sudo install -d $conf
 
 # This is very dangerous.
 sudo tar xvzf \$user/$archive #\$HOME?
@@ -290,7 +258,7 @@ sudo \$user/\$rep_script
 
 sudo $bin/ch.sh \$top
 
-if [ -f $prod/lib ]; then
+if [ -L $prod/lib ]; then
   sudo rm -f $prod/lib
 fi
 
@@ -364,8 +332,8 @@ sub create_archive{
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
-
-		&install_file_($root, "0644", "$w/$name", $target);
+#		print "$w/$name --> $target\n";
+		&install_file_($root, "0644", $target, "$w/$name");
 	    }
 	}
 	close($FIND);
@@ -431,55 +399,85 @@ END
     foreach my $p (@install_params){
 	my($owner, $mode, $path) = @$p;
 	$path =~ s|^$CHROOT||;
-
+	print "@$p \n";
 	if($mode){
-	    $content .= "echo \$top$path\n";
-	    $content .= "chmod $mode \$top$path\n";
+	    $content .= "chmod $mode ./$path\n";
 	}
 	if($owner){
-	    $content .= "chown $owner \$top$path\n";
+	    $content .= "chown $owner ./$path\n";
 	}
     }
     &create_script_("$CHROOT/$dir_sh", $sh, $content);
 }
 
-# install_() is a bit tricky for supporting dir and file installation.
+#install_() is a bit tricky for supporting dir and file installation.
 sub install_{
-    my($owner, $mode, $path, $file, @opt) = @_;
+    my($owner, $mode, $from, $to, @opt) = @_;
     $owner =~ s/\:/./;
-    my(@r) = ($owner, $mode, $path);
+    my(@r) = ($owner, $mode, $to);
+    print "#### @r\n";
     push @install_params, \@r;
 
-
     push @opt, &install_opt($owner, $mode);
-    if($file eq ""){
+    if($from eq ""){
 	push @opt, " -d ";
     }
-    my($inst) = "$INSTALL @opt $file $path";
-    &run_( $inst );
+    my($inst) = "$INSTALL @opt $from $to";
+    print "$inst\n";
+    &run_($inst);
+}
+
+
+sub install_dir_{
+    my($owner, $mode, @dirs) = @_;
+    foreach my $d (@dirs){
+	&install_($owner, $mode, "", $d);
+    }
 }
 
 sub install_file_{
-    my($owner, $mode, $to, $from, @opt) = @_;
-
-    &install_($owner, $mode, $to, $from, @opt);
-}
-
-sub install_dir_{
-    my($owner, $mode, @dir) = @_;
-    my(@opt) = &install_opt($owner, $mode);
-
-    foreach my $d (@dir){
-	&install_($owner, $mode, $d, "", @opt);
+    my($owner, $mode, $from, $to, @opt) = @_;
+    my @from_ = split /\//, $from;
+    my @to_ = split /\//, $to;
+    if($from_[-1] eq $to_[-1]){
+	&install_($owner, $mode, $from, $to, @opt);
+    }else{
+	&install_($owner, $mode, $from, "$to/$from_[-1]", @opt);
     }
 }
 
 sub install_files_{
     my($owner, $mode, $dir, @confs) = @_;
     foreach my $f (@confs){
-	&install_file_($owner, $mode, $dir, $f);
+	&install_file_($owner, $mode, $f, $dir);
     }
 }
+
+
+# sub install_dir_{
+#     my($owner, $mode, @dir) = @_;
+#     my(@opt) = &install_opt($owner, $mode);
+
+#     foreach my $d (@dir){
+# 	&install_($owner, $mode, $d, "", @opt);
+#     }
+# }
+
+# sub install_file_{
+#     my($owner, $mode, $to, $from, @opt) = @_;
+
+#     &install_($owner, $mode, $to, $from, @opt);
+# }
+
+# sub install_files_{
+#     my($owner, $mode, $dir, @confs) = @_;
+#     print ">>> $owner $mode $dir --- @confs\n";
+#     &install_dir_($owner, "0755", $dir);
+#     foreach my $f (@confs){
+# 	print "==== $dir $f\n";
+# 	&install_file_($owner, "1111", $dir, $f);
+#     }
+#}
 
 
 
@@ -496,6 +494,7 @@ sub get_conf{
 	    while(my $f = <$F>){
 		chomp $f;
 		push @confs, $f;
+		print "### $f\n";
 	    }
 	    close($F);
 	}
@@ -511,6 +510,7 @@ sub get_confs{
 	my $confs = &get_conf($d);
 	push @confs, @$confs;
     }
+    print "*** @confs\n";
     return @confs;
 }
 
@@ -764,7 +764,6 @@ sub read_remote{
 sub replace_script_{
     my($file, @rest) = @_;
 
-    print "=======$file\n";
     my($content);
     foreach my $rep (@rest){
 	my($left, $right) = split(/-->/, $rep);
@@ -775,6 +774,8 @@ sub replace_script_{
 	}
     }
     return <<"END_OF_SCRIPT";
+top=\$1
+
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
 mv \$f $file;
@@ -787,7 +788,6 @@ sub create_replace_script_{
     my($content);
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
-	print "%%%%%%%% $f\n";
 	$content .= &replace_script_($f, @$x);
     }
 
@@ -806,7 +806,7 @@ usage:$prog fetch                   # fetch jdk and apache-maven
       $prog rev-checkout rev url    # checkout latest source from url with rev
       $prog build [dirs]            # build and archive files in local directory
 #      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
-      $prog deploy  rchive-file staging-user staging-host [configs]
+      $prog deploy  rchive-file staging-user staging-host password [configs]
 
       $prog help
 END_OF_USAGE
