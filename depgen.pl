@@ -48,10 +48,9 @@ sub dispatch_{
     if($ARGV[0] eq "setup"){
 	&do_setup_(@argv);
     }elsif($ARGV[0] eq "fetch"){
-	# XXX 
-	&fetch("http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz", 
-	       "Cookie: oraclelicense=accept-securebackup-cookie");
-	&fetch("http://ftp.yz.yamagata-u.ac.jp/pub/network/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz")
+	&do_fetch_(	   
+	     "http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz",
+	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz");
     }elsif(($ARGV[0] eq "tag")){
 	&do_tag_(@argv);
     }elsif(($ARGV[0] eq "checkout")){
@@ -104,6 +103,13 @@ HELP
     }else{
 	&usage_($0);
     }
+}
+#
+sub do_fetch_{
+    my($jdk, $maven) = @_;
+    &fetch($jdk,
+	   "Cookie: oraclelicense=accept-securebackup-cookie");
+    &fetch($maven, "");
 }
 
 
