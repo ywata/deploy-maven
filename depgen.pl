@@ -279,10 +279,10 @@ sudo \$rep_script \$top
 sudo $bin/ch.sh \$top
 
 if [ -L $prod/lib ]; then
-  sudo m -f $prod/lib
+  sudo rm -f \$top/$prod/lib
 fi
 
-sudo ln -s $lib $prod/lib
+sudo ln -s \$top/$lib \$top/$prod/lib
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -441,7 +441,6 @@ END
     &create_script_("$CHROOT/$dir_sh", $sh, $content);
 }
 
-#install_() is a bit tricky for supporting dir and file installation.
 sub install_{
     my($owner, $mode, $from, $to, @opt) = @_;
     $owner =~ s/\:/./;
@@ -470,7 +469,7 @@ sub install_file_{
     my($owner, $mode, $from, $to, @opt) = @_;
     my @from_ = split /\//, $from;
     my @to_ = split /\//, $to;
-    if($from_[-1] eq $to_[-1]){
+    if($from_[-1] eq $to_[-1]){ 
 	&install_($owner, $mode, $from, $to, @opt);
     }else{
 	&install_($owner, $mode, $from, "$to/$from_[-1]", @opt);
