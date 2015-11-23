@@ -165,6 +165,9 @@ sub do_transfer_{
 
 sub do_deploy_{
     my($staging_user, $staging_host, @configs) = @_;
+    if($#configs < 0){
+	&usage_($0);
+    }
 
     foreach my $repfile (@configs){
 	my($user, $host, $top, %rep_info) = &init_replace($repfile);
@@ -179,6 +182,9 @@ sub do_deploy_{
 sub do_build_{
     my($tag, $ver, @dirs) = @_; 
     print STDERR "do_build_:@dirs\n";
+    if($#dirs < 0){
+	&usage_($0);
+    }
 
 #    my($show_info) = `mvn --show-info`;
 #    chomp($show_info);
@@ -310,6 +316,7 @@ sub create_deploy_one_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
+
     # This script runs on staging server.
     my $content = <<"END_OF_DEPLOY";
 target_user=\$1
@@ -801,11 +808,11 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog checkout url                    # checkout latest source from url
       $prog tag-checkout tag url            # checkout latest source from url with tag
       $prog rev-checkout rev url            # checkout latest source from url with rev
-      $prog build [dirs]                    # build and archive files in local directory
+      $prog build dir (dirs...)             # build and archive files in local directory
       $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
-      $prog deploy staging-user staging-host [configs]        # deploy files on hosts
-      $prog create-table staging-user staging-host [configs]  # currently not implemented
-      $prog upload-table staging-user staging-host [configs]  # currently not implemented
+      $prog deploy staging-user staging-host config (config...)       # deploy files on hosts
+      $prog create-table staging-user staging-host [configs]          # currently not implemented
+      $prog upload-table staging-user staging-host [configs]          # currently not implemented
       $prog help
 END_OF_USAGE
 
