@@ -706,7 +706,7 @@ sub read_replacements{
 	return (); # almost end of file
     }
     
-    my @list = ($to);
+    my @list = ($to); ### Ugly hack!
     while(<$handle>){
 	chomp;
 	next if(m|^#|);
@@ -762,7 +762,7 @@ sub read_remote{
 
 
 sub replace_script_{
-    my($file, $to, @rest) = @_;
+    my($file, $to, @rest) = @_;### Ugly hack!
 
     my($content);
     foreach my $rep (@rest){
