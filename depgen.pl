@@ -79,7 +79,9 @@ sub dispatch_{
 	&do_build_($t, $v, @argv);
     }elsif(($ARGV[0] eq "deploy")){
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
-	&do_deploy_($t, $v, @argv);
+	&do_transfer_($t, $v, @argv);
+    }elsif(($ARGV[0] eq "transfer")){
+	&do_depoy_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
@@ -141,8 +143,8 @@ sub do_checkout_{
     }
 }
 
-sub do_deploy_{
-    my($tag, $ver, $archive, $step_user, $step_host, @configs) = @_;
+sub do_trasfer_{
+    my($tag, $ver, $archive, $step_user, $step_host) = @_;
     my(@path) = split /\//, $archive;
     
     if(-f $archive ){
@@ -152,16 +154,20 @@ sub do_deploy_{
     }
     &ssh_("rm -rf usr", "", $step_user, $step_host);
     &ssh_("tar xvzf $path[-1]", "", $step_user, $step_host);
-    
+}
+
+sub do_deploy_{
+    my($step_user, $step_host, @configs) = @_;
+
     foreach my $repfile (@configs){
 	my($user, $host, $root, %rep_info) = &init_replace($repfile);
 
 	my $script = &create_replace_script_($host, %rep_info);
 	&run_("scp $CHROOT/$script $step_user\@$step_host:usr/");
-	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script", "-t", $step_user, $step_host);
+	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $root usr/$script", " -t ", $step_user, $step_host);
     }
+    
 }
-
 
 sub do_build_{
     my($tag, $ver, @dirs) = @_; 
@@ -195,7 +201,8 @@ sub do_build_{
 	chdir $cwd || die "cd $cwd failed";
     }
 
-    my @confs = &get_confs(@dirs);
+    print ">>>>>>>@dirs \n";
+    my @confs = &get_confs("conf", @dirs);
 
 
     my($lib, $bin, $conf, $archive);
@@ -252,17 +259,23 @@ rep_script=\$3
 mkdir \$top
 cd \$top
 
-# This is very dangerous.
-sudo tar xvzf \$user/$archive #\$HOME?
-sudo \$user/\$rep_script
+su - \$user
 
-sudo $bin/ch.sh \$top
+# This is very dangerous.
+#sudo tar xvzf \$user/$archive #\$HOME?
+#sudo \$user/\$rep_script
+tar xvzf \$user/$archive #\$HOME?
+\$user/\$rep_script
+
+#sudo $bin/ch.sh \$top
 
 if [ -L $prod/lib ]; then
-  sudo rm -f $prod/lib
+#  sudo rm -f $prod/lib
+  rm -f $prod/lib
 fi
 
-sudo ln -s $lib $prod/lib
+#sudo ln -s $lib $prod/lib
+ln -s $lib $prod/lib
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -482,19 +495,18 @@ sub install_files_{
 
 
 sub get_conf{
-    my($dir) = @_;
+    my($conf, $dir) = @_;
     my @confs;
     open(my $FIND, "find $dir -type d -name conf |") or die "find failed for open";
     while(my $l = <$FIND>){
 	chomp $l;
 	my $c = $l;
-	$c =~ s/conf$//;
+	$c =~ s/$conf$//;
 	if( -f "$c/pom.xml"){
 	    open(my $F, "find $l -type f |") or die "find failed for open";
 	    while(my $f = <$F>){
 		chomp $f;
 		push @confs, $f;
-		print "### $f\n";
 	    }
 	    close($F);
 	}
@@ -504,13 +516,12 @@ sub get_conf{
 }
 
 sub get_confs{
-    my(@dirs) = @_;
+    my($conf, @dirs) = @_;
     my @confs;
     foreach my $d (@dirs){
-	my $confs = &get_conf($d);
+	my $confs = &get_conf($conf, $d);
 	push @confs, @$confs;
     }
-    print "*** @confs\n";
     return @confs;
 }
 
@@ -806,7 +817,8 @@ usage:$prog fetch                   # fetch jdk and apache-maven
       $prog rev-checkout rev url    # checkout latest source from url with rev
       $prog build [dirs]            # build and archive files in local directory
 #      $prog deploy archive-file staging-user staging-host target-host-user target-hosts 
-      $prog deploy  rchive-file staging-user staging-host password [configs]
+      $prog trasfer rchive-file staging-user staging-host
+      $prog deploy staging-user staging-host [configs]
 
       $prog help
 END_OF_USAGE
