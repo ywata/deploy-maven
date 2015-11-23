@@ -697,20 +697,21 @@ sub install_setup{
 }
 
 sub read_replacements{
-    my($handle) = @_;
-    my $target = "";
+    my($handle, $top) = @_;
+    my($from, $to) = ("", "");
     while(<$handle>){
 	# first, search [???] line.
 	if(m|^\[(.+)\]|){
-	    $target = $1;
+	    #	    $target = $1;
+	    ($from, $to) = ($1, "$top/$1");
 	    last;
 	}
     }
-    if($target eq ""){
+    if($from eq ""){
 	return (); # almost end of file
     }
     
-    my @list;
+    my @list = ($to);
     while(<$handle>){
 	chomp;
 	next if(m|^#|);
@@ -718,7 +719,7 @@ sub read_replacements{
 	push @list, $_;
 
     }
-    return ($target, \@list);
+    return ($from, \@list);
 }
 
 sub init_replace{
@@ -728,12 +729,12 @@ sub init_replace{
     my($user, $host, $top) = &read_remote($F);
     
     while(!eof($F)){
-	my ($target, $reps) = &read_replacements($F);
-	if(defined($reps{$target})){
+	my ($from, $reps) = &read_replacements($F, $top);
+	if(defined($reps{$from})){
 	    die "file duplication in $file";
 	}
-	if($target ne ""){
-	    $reps{$target} = $reps;
+	if($from ne ""){
+	    $reps{$from} = $reps;
 	}
     }
     close($F);
@@ -766,7 +767,7 @@ sub read_remote{
 
 
 sub replace_script_{
-    my($file, @rest) = @_;
+    my($file, $to, @rest) = @_;
 
     my($content);
     foreach my $rep (@rest){
@@ -782,7 +783,7 @@ top=\$1
 
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
-mv \$f $file;
+mv \$f $to;
 END_OF_SCRIPT
 }
 
