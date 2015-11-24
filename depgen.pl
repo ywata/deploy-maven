@@ -735,7 +735,7 @@ sub read_config{
     
     while(!eof($F)){
 	my ($op, $from, $to, $reps, @rest) = &read_section($F, $top);
-	print "@$reps @rest\n";
+#	print "@$reps @rest\n";
 	if(defined($reps{$from})){
 	    die "file duplication in $file";
 	}
@@ -817,7 +817,7 @@ sub create_replace_script_{
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
 	my($op, $from, $to, $rest) = @$x;
-	print "@$rest\n";
+#	print "@$rest\n";
 	$content .= &replace_script_($f, $op, $from, $to, @$rest);
     }
 
