@@ -18,7 +18,7 @@ my $JAVA_HOME = "java_home";
 my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
 my $CHROOT = "chroot";
-my $root = "root.root";
+my $root = "bitnami.bitnami";
 
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
@@ -170,11 +170,16 @@ sub do_deploy_{
     }
 
     foreach my $repfile (@configs){
-	my($user, $host, $top, %rep_info) = &init_replace($repfile);
+	my($user, $host, $top, %rep_info) = &read_config($repfile);
+	# foreach my $k (keys %rep_info){
+	#     my($x, $y) = $rep_info{$k};
+	#     my($a, $b) = @$x;
+	#     print "$a>>>@$b>>>\n";
+	# }
 
 	my $script = &create_replace_script_($host, %rep_info);
-	&run_("scp $CHROOT/$script $staging_user\@$staging_host:usr/");
-	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $staging_user, $staging_host);
+#	&run_("scp $CHROOT/$script $staging_user\@$staging_host:usr/");
+#	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $staging_user, $staging_host);
     }
     
 }
@@ -680,8 +685,6 @@ sub writeVersion_{
     close($F);
 }
 
-
-
 sub install_setup{
     while(<DATA>){
 	next if(m|^#|);
@@ -691,14 +694,22 @@ sub install_setup{
     }
 }
 
-sub read_replacements{
+sub read_section{
     my($handle, $top) = @_;
     my($from, $to) = ("", "");
+    my($op, @rest);
     while(<$handle>){
 	# first, search [???] line.
+	chomp;
 	if(m|^\[(.+)\]|){
 	    #	    $target = $1;
-	    ($from, $to) = ($1, "$top/$1");
+	    #	    ($from, $to) = ($1, "$top/$1");
+	    my @direction = split qw(:), $1;
+	    $op = shift @direction;
+	    $from = shift @direction;
+	    $to = "$top" . shift @direction;
+	    @rest = @direction;
+
 	    last;
 	}
     }
@@ -712,31 +723,34 @@ sub read_replacements{
 	next if(m|^#|);
 	last if(m|^$|);
 	push @list, $_;
-
     }
-    return ($from, \@list);
+    print ">>>@list \n";
+    return ($op, $from, $to, \@list, @rest);
 }
 
-sub init_replace{
+sub read_config{
     my($file) = @_;
     my %reps;
     open(my $F, $file) or die "Cannot open $file.";
-    my($user, $host, $top) = &read_remote($F);
+    my($user, $host, $top) = &read_global_settings($F);
     
     while(!eof($F)){
-	my ($from, $reps) = &read_replacements($F, $top);
+	my ($op, $from, $to, $reps, @rest) = &read_section($F, $top);
+	print "$#rest @rest\n";
 	if(defined($reps{$from})){
 	    die "file duplication in $file";
 	}
 	if($from ne ""){
-	    $reps{$from} = $reps;
+	    my @a = ($op, $to, $reps);
+#	    print "#####$op $to @$reps\n";
+	    $reps{$from} = \@a;
 	}
     }
     close($F);
     return ($user, $host, $top, %reps);
 }
 
-sub read_remote{
+sub read_global_settings{
     my($F) = @_;
     my(%global);
     while(<$F>){
@@ -766,11 +780,14 @@ sub replace_script_{
 
     my($content);
     foreach my $rep (@rest){
-	my($left, $right) = split(/-->/, $rep);
-	if($right eq ""){
-	    die "config file format error $rep";
-	}else{
-	    $content .= "s|^$left\$|$right|;"
+	my($op, $to, @rest) = @$rep;
+	foreach my $r (@rest){
+	    my($left, $right) = split(/-->/, $r);
+	    if($right eq ""){
+		die "config file format error $rep";
+	    }else{
+		$content .= "s|^$left\$|$right|;"
+	    }
 	}
     }
     return <<"END_OF_SCRIPT";
@@ -788,7 +805,8 @@ sub create_replace_script_{
     my($content);
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
-	$content .= &replace_script_($f, @$x);
+	my($op, $to, @rest) = @$x;
+	$content .= &replace_script_($f, $to, @rest);
     }
 
     &create_script_($CHROOT, "$host.sh", $content);
