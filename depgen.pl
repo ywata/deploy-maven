@@ -785,6 +785,7 @@ sub replace_script_{
     print "<$op> $from $to\n";    
     my($content);
     foreach my $rep (@rest){
+	print "$rep ";
 	if($op eq "CONF"){
 	}elsif($op eq "CRON"){
 	}elsif($op eq "SCRIPT"){
@@ -799,6 +800,7 @@ sub replace_script_{
 	    $content .= "s|^$left\$|$right|;"
 	}
     }
+    print "\n";
     return <<"END_OF_SCRIPT";
 top=\$1
 
