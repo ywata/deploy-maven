@@ -170,7 +170,7 @@ sub do_deploy_{
     }
 
     foreach my $repfile (@configs){
-	my($user, $host, $top, %rep_info) = &read_config($repfile);
+	my($user, $host, $top, %rep_info) = &read_config($repfile); #%rep_info ($op, $from, $to, $reps);
 	# foreach my $k (keys %rep_info){
 	#     my($x, $y) = $rep_info{$k};
 	#     my($a, $b) = @$x;
@@ -707,9 +707,9 @@ sub read_section{
 	    my @direction = split qw(:), $1;
 	    $op = shift @direction;
 	    $from = shift @direction;
-	    $to = "$top" . shift @direction;
-	    @rest = @direction;
+	    $to = "$top/" . shift @direction;
 
+	    @rest = @direction;
 	    last;
 	}
     }
@@ -717,14 +717,13 @@ sub read_section{
 	return (); # almost end of file
     }
     
-    my @list = ($to); ### Ugly hack!
+    my @list;
     while(<$handle>){
 	chomp;
 	next if(m|^#|);
 	last if(m|^$|);
 	push @list, $_;
     }
-    print ">>>@list \n";
     return ($op, $from, $to, \@list, @rest);
 }
 
@@ -736,12 +735,12 @@ sub read_config{
     
     while(!eof($F)){
 	my ($op, $from, $to, $reps, @rest) = &read_section($F, $top);
-	print "$#rest @rest\n";
+	print "@$reps @rest\n";
 	if(defined($reps{$from})){
 	    die "file duplication in $file";
 	}
 	if($from ne ""){
-	    my @a = ($op, $to, $reps);
+	    my @a = ($op, $from, $to, $reps);
 #	    print "#####$op $to @$reps\n";
 	    $reps{$from} = \@a;
 	}
@@ -774,20 +773,30 @@ sub read_global_settings{
     return ($global{"User"}, $global{"Host"}, $global{"Root"});
 }
 
+sub mk_conf{
+}
+sub mk_cron{
+}
+sub mk_script{
+}
 
 sub replace_script_{
-    my($file, $to, @rest) = @_;### Ugly hack!
-
+    my($file, $op, $from, $to, @rest) = @_;### Ugly hack!
+    print "<$op> $from $to\n";    
     my($content);
     foreach my $rep (@rest){
-	my($op, $to, @rest) = @$rep;
-	foreach my $r (@rest){
-	    my($left, $right) = split(/-->/, $r);
-	    if($right eq ""){
-		die "config file format error $rep";
-	    }else{
-		$content .= "s|^$left\$|$right|;"
-	    }
+	if($op eq "CONF"){
+	}elsif($op eq "CRON"){
+	}elsif($op eq "SCRIPT"){
+	}else{
+	    die "unknown op <$op> found";
+	}
+
+	my($left, $right) = split(/-->/, $rep);
+	if($right eq ""){
+	    die "config file format error $rep";
+	}else{
+	    $content .= "s|^$left\$|$right|;"
 	}
     }
     return <<"END_OF_SCRIPT";
@@ -805,8 +814,9 @@ sub create_replace_script_{
     my($content);
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
-	my($op, $to, @rest) = @$x;
-	$content .= &replace_script_($f, $to, @rest);
+	my($op, $from, $to, $rest) = @$x;
+	print "@$rest\n";
+	$content .= &replace_script_($f, $op, $from, $to, @$rest);
     }
 
     &create_script_($CHROOT, "$host.sh", $content);
