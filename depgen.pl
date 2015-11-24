@@ -18,7 +18,7 @@ my $JAVA_HOME = "java_home";
 my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
 my $CHROOT = "chroot";
-my $root = "bitnami.bitnami";
+my $root = "root.root";
 
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
