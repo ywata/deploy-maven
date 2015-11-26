@@ -159,7 +159,7 @@ sub do_transfer_{
     }else{
 	die "$archive not found.";
     }
-    &ssh_("rm -rf usr", "", $staging_user, $staging_host);
+    &ssh_("rm -rf opt", "", $staging_user, $staging_host);
     &ssh_("tar xvzf $path[-1]", "", $staging_user, $staging_host);
 }
 
@@ -178,8 +178,6 @@ sub do_deploy_{
 	# }
 
 	my $script = &create_replace_script_($host, %rep_info);
-#	&run_("scp $CHROOT/$script $staging_user\@$staging_host:usr/");
-#	&ssh_("usr/local/prod/bin/deploy_one.sh $user $host $top usr/$script", " -t ", $staging_user, $staging_host);
     }
     
 }
@@ -224,7 +222,7 @@ sub do_build_{
 
 
     my($lib, $bin, $conf, $archive);
-    my $prod = "usr/local/prod";
+    my $prod = "opt/prod";
 
     if($ver eq ""){
 	$lib = "$prod/lib";
@@ -242,24 +240,11 @@ sub do_build_{
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
     &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
-    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
-    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod");
-    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/usr/local/prod", \%deps, @dirs);
+    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod");
+    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod");
+    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod", \%deps, @dirs);
 }
 
-# host: chroot/archive.???.tar.gz 
-# step server: $HOME/archive.???.tar.gz
-#                   usr/local/prod/bin
-#                   usr/local/prod/conf
-#                   usr/local/prod/lib.???
-# target server : $HOME/archive.???.tar.gz
-#                      usr/local/prod/bin
-#                      usr/local/prod/conf
-#                      usr/local/prod/lib.???
-#                  /usr/local/prod/bin
-#                  /usr/local/prod/conf
-#                  /usr/local/prod/lib.???
-#                  /usr/local/prod/lib
 
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
@@ -309,7 +294,7 @@ target_user=\$1
 target_host=\$2
 target_top=\$3
 
-find usr -type f | sed -e 's/^/\$target_top\//' |ssh -t \$target_user\@\$target_host sudo xargs rm -f
+find opt -type f | sed -e 's/^/\$target_top\//' |ssh -t \$target_user\@\$target_host sudo xargs rm -f
 END_OF_PURGE
 }
 
@@ -327,7 +312,7 @@ rep_script=\$4
 
 scp $archive \$target_user\@\$target_host:$archive
 ssh -t \$target_user\@\$target_host tar xvzf $archive
-scp \$rep_script \$target_user\@\$target_host:usr
+scp \$rep_script \$target_user\@\$target_host:opt
 ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \$target_user \$target_top \$rep_script
 END_OF_DEPLOY
 #    print "$content";
@@ -338,10 +323,61 @@ sub create_archive{
     my($tag, $ver, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
     my %deps = %$deps;
 
+    &collect_config($conf, @dirs);
+#    &collect_jar($lib, $deps, @dirs);
+    &create_change_mode_owner_($bin, "ch.sh");
+    
+    &archive_($CHROOT, $archive);
+}
+
+sub l{
+    my($path) = @_;
+    my(@path) = split(/\//, $path);
+    return "$path[-1]";
+}
+sub collect_config{
+    my($conf, @dirs) = @_;
     foreach my $d (@dirs){
-#	print "---> @$deps{$d} @$deps{$d}\n";
+	open(my $FIND, "find $d |") or die "find $d failed";
+	while(my $path = <$FIND>){
+	    chomp $path;
+
+	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
+	    if($path=~    m|((.+/)?([^\/]+))/bin/(.+\.sh)$|){
+		($tag, $dir, $from, $to, $mode) = ("sh", &l($1), "$4", "opt/prod/$dir/bin/", "0755");
+	    }elsif($path=~ m|((.+/)?([^\/]+))/bin/([^\.]+$)|){     #startup script
+		($tag, $dir, $from, $to, $mode) = ("startup", &l($1), "$4", "etc/init.d/", "0644");
+	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(logback.xml)|){
+		($tag, $dir, $from, $to, $mode) = ("logback", &l($1), "$4", "opt/prod/$dir/config/", "0644");
+	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.properties)|){
+		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "opt/prod/$dir/config//", "0644");
+	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.cron)|){
+		($tag, $dir, $from, $to, $mode) = ("cron",&l($1), "$4", "opt/prod/$dir/config/", "0644");
+	    }elsif($path=~ m|((.+/)?([^\/]+))/sql/(.+.sql)|){
+		($tag, $dir, $from, $to, $mode) = ("sql", &l($1), "$4", "opt/prod/$dir/sql/", "0644");
+	    }else{
+		next;
+	    }
+	    next if( ! -f "$dir/pom.xml");
+
+
+	    print "$to\n";
+	    if(! -d "$CHROOT/to"){
+		print "$path $dir $from $to\n";
+		&install_dir_($root, "0755", "$CHROOT/$to");
+	    }
+	    &install_file_($root, $mode, $path, "$CHROOT/$to");
+
+	}
+	close($FIND);
+    }
+}
+
+sub collect_jar{
+    my($lib, $deps, @dirs) = @_;
+    foreach my $d (@dirs){
+	#	print "---> @$deps{$d} @$deps{$d}\n";
 	my %artifacts = &pack_conv($d, @$deps{$d});
-	
 	
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
@@ -354,29 +390,26 @@ sub create_archive{
 	    }elsif(m|(.+)/target/([^/]+\.jar)|){
 		($where, $dep, $name, $target) = ($1, 0, $2, $_);
 	    }else{
-#		print "Warning $_\n";
+		#		print "Warning $_\n";
 		next;
 	    }
 	    my($w) = "$CHROOT/$lib/$where";
-
+	    
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
 	    if($artifacts{$base} eq "test"){
-#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
+		#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
-#		print "$target is OK $base $artifacts{$base}\n";
+		#		print "$target is OK $base $artifacts{$base}\n";
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
-#		print "$w/$name --> $target\n";
+		#		print "$w/$name --> $target\n";
 		&install_file_($root, "0644", $target, "$w/$name");
 	    }
 	}
 	close($FIND);
     }
-    &create_change_mode_owner_($bin, "ch.sh");
-    
-    &archive_($CHROOT, $archive);
 }
 
 sub pack_conv{
@@ -411,7 +444,7 @@ sub run_mvn{
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
-    &run_("$TAR cvzf $archive usr 2>&1 ");
+    &run_("$TAR cvzf $archive opt 2>&1 ");
     
     chdir $cwd or die "cd $cwd";
 }
@@ -458,7 +491,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-#    print "$inst\n";
+    print "$inst\n";
     &run_($inst);
 }
 
