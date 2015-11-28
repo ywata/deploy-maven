@@ -196,8 +196,8 @@ sub do_deploy_{
 
 	print STDERR "starting deployment for $host\n";
 	sleep 1;
-	&run_("scp $script $staging_user\@$staging_host:$install_top");
-	
+	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$install_top");
+	&ssh_("$prod/bin/deploy_one.sh $user $host $top $install_top/$script", " -t ", $staging_user, $staging_host);
     }
     
 }
@@ -242,7 +242,6 @@ sub do_build_{
 
 
     my($lib, $bin, $conf, $archive);
-    $prod = $install_dir;
 
     if($ver eq ""){
 	$lib = "$prod/lib";
@@ -344,7 +343,7 @@ sub create_archive{
     my %deps = %$deps;
 
     &collect_config($conf, @dirs);
-#    &collect_jar($lib, $deps, @dirs);
+    &collect_jar($lib, $deps, @dirs);
     &create_change_mode_owner_($bin, "ch.sh");
     
     &archive_($CHROOT, $archive);
@@ -364,27 +363,33 @@ sub collect_config{
 
 	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
 	    if($path=~    m|((.+/)?([^\/]+))/bin/(.+\.sh)$|){
-		($tag, $dir, $from, $to, $mode) = ("sh", &l($1), "$4", "$prod/$dir/bin/", "0755");
+		($tag, $dir, $from, $mode) = ("sh", &l($1), "$4", "0755");
+		$to = "$prod/$dir/bin";
 	    }elsif($path=~ m|((.+/)?([^\/]+))/bin/([^\.]+$)|){     #startup script
-		($tag, $dir, $from, $to, $mode) = ("startup", &l($1), "$4", "$prod/etc/init.d/", "0644");
+		($tag, $dir, $from, $mode) = ("startup", &l($1), "$4",  "0644");
+		$to = "etc/init.d/";
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(logback.xml)|){
-		($tag, $dir, $from, $to, $mode) = ("logback", &l($1), "$4", "$prod/$dir/config/", "0644");
+		($tag, $dir, $from, $mode) = ("logback", &l($1), "$4", "0644");
+		$to = "$prod/$dir/config/";
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.properties)|){
-		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "$prod/$dir/config/", "0644");
+		($tag, $dir, $from, $mode) = ("prop", &l($1), "$4", "0644");
+		$to = "$prod/$dir/config/";
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.cron)|){
-		($tag, $dir, $from, $to, $mode) = ("cron",&l($1), "$4", "$prod/$dir/config/", "0644");
+		($tag, $dir, $from, $mode) = ("cron",&l($1), "$4", "0644");
+		$to = "$prod/$dir/config/";
 	    }elsif($path=~ m|((.+/)?([^\/]+))/sql/(.+.sql)|){
-		($tag, $dir, $from, $to, $mode) = ("sql", &l($1), "$4", "$prod/$dir/sql/", "0644");
+		($tag, $dir, $from, $mode) = ("sql", &l($1), "$4", "0644");
+		$to =  "$prod/$dir/sql/";
 	    }else{
+		
 		next;
 	    }
+	    print ">>>>$path $dir $from $to\n";
 	    next if( ! -f "$dir/pom.xml");
 	    $to =~ s|//|/|g;
 
-
-	    print ">>dir=$dir from=$from to=$to\n";
+	    print ">>>>$path $dir $from $to\n";
 	    if(! -d "$CHROOT/$to"){
-		print "$path $dir $from $to\n";
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
 	    &install_file_($root, $mode, $path, "$CHROOT/$to");
@@ -465,7 +470,8 @@ sub run_mvn{
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
-    &run_("$TAR cvzf $archive $install_top 2>&1 ");
+    #    &run_("$TAR cvzf $archive $install_top 2>&1 ");
+    &run_("$TAR cvzf $archive . 2>&1 ");
     
     chdir $cwd or die "cd $cwd";
 }
@@ -836,13 +842,33 @@ sub mk_script{
 
 sub replace_command_{
     my($file, $op, $from, $to, @rest) = @_;### Ugly hack!
-    print "<$op> $from $to\n";    
+    print "<$op> $from $to\n";
     my($content);
+
+    my $dir = $to;
+    $dir =~ s/\[^\]+//;
+    
     foreach my $rep (@rest){
 	print "$rep ";
-	if($op eq "CONF"){
+	if($op eq "CONF" or $op eq "SCRIPT"){
+	    return <<"END_OF_SCRIPT";
+top=\$1
+
+f=\`mktemp tmp.XXXXX\`
+sed -e \'$content \' $file > \$f
+install -d $dir
+install \$f $to
+END_OF_SCRIPT
 	}elsif($op eq "CRON"){
-	}elsif($op eq "SCRIPT"){
+	    return <<"END_OF_SCRIPT";
+top=\$1
+
+f=\`mktemp tmp.XXXXX\`
+sed -e \'$content \' $file > \$f
+install \$f $to
+
+END_OF_SCRIPT
+	    
 	}else{
 	    die "unknown op <$op> found";
 	}
@@ -855,13 +881,6 @@ sub replace_command_{
 	}
     }
     print "\n";
-    return <<"END_OF_SCRIPT";
-top=\$1
-
-f=\`mktemp tmp.XXXXX\`
-sed -e \'$content \' $file > \$f
-install \$f $to
-END_OF_SCRIPT
 }
 
 # Needs some investigation for security.
@@ -873,6 +892,7 @@ sub create_replace_script_{
 	my($op, $from, $to, $rest) = @$x;
 
 	if($from =~ m|$install_dir|){
+	    print "### $f $op $from $to    -- @$rest";
 	    $content .= &replace_command_($f, $op, $from, $to, @$rest);
 	}else{
 	    die "$from should be in $install_dir";
@@ -880,7 +900,7 @@ sub create_replace_script_{
     }
 
     &create_script_($CHROOT, "$host.sh", $content);
-    return "$CHROOT/$host.sh";
+    return "$host.sh";
 }
 
 sub set_install_dir{
@@ -892,6 +912,8 @@ sub set_install_dir{
     $install_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
     my @path = split /\//, $install_dir;
     $install_top = $path[0];
+    $prod = $install_dir;
+    
 }
 
 sub write_build_config{
