@@ -17,11 +17,20 @@ my $BINDIR = "$ENV{HOME}/bin_";
 my $JAVA_HOME = "java_home";
 my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
+my $BUILD_CONFIG       = ".build_config";
 my $CHROOT = "chroot";
 my $root = "bitnami.bitnami";
 
+
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
+
+my $install_dir;
+my $install_top;
+
+
+#my $prod = "prod";
+my $prod;
 
 $TAR = &findFile($TAR, @Bins);
 $SVN = &findFile($SVN, @Bins);
@@ -44,13 +53,15 @@ sub dispatch_{
     if(!defined($ARGV[0])){
 	$ARGV[0] = ""; # to suppress warnings.
     }
-    
+
     if($ARGV[0] eq "setup"){
 	&do_setup_(@argv);
     }elsif($ARGV[0] eq "fetch"){
 	&do_fetch_(	   
 	     "http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz",
 	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz");
+    }elsif($ARGV[0] eq "prepare"){
+	&do_prepare_(@argv);
     }elsif(($ARGV[0] eq "tag")){
 	&do_tag_(@argv);
     }elsif(($ARGV[0] eq "checkout")){
@@ -74,12 +85,15 @@ sub dispatch_{
 	my($opt) = "checkout  -r " . shift @argv;
 	&do_checkout_($opt, @argv);
     }elsif(($ARGV[0] eq "build")){
+	&set_install_dir();	
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
     }elsif(($ARGV[0] eq "transfer")){
+	&set_install_dir();
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_transfer_($t, $v, @argv);
     }elsif(($ARGV[0] eq "deploy")){
+	&set_install_dir();
 	&do_deploy_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
@@ -104,6 +118,14 @@ HELP
 	&usage_($0);
     }
 }
+
+sub do_prepare_{
+    my(@config) = @_;
+    &usage_($0) if($#config != 0);
+
+    &write_build_config("install_dir" => $config[0]);
+}
+
 #
 sub do_fetch_{
     my($jdk, $maven) = @_;
@@ -159,7 +181,7 @@ sub do_transfer_{
     }else{
 	die "$archive not found.";
     }
-    &ssh_("rm -rf opt", "", $staging_user, $staging_host);
+    &ssh_("rm -rf $install_top", "", $staging_user, $staging_host);
     &ssh_("tar xvzf $path[-1]", "", $staging_user, $staging_host);
 }
 
@@ -171,12 +193,6 @@ sub do_deploy_{
 
     foreach my $repfile (@configs){
 	my($user, $host, $top, %rep_info) = &read_config($repfile); #%rep_info ($op, $from, $to, $reps);
-	# foreach my $k (keys %rep_info){
-	#     my($x, $y) = $rep_info{$k};
-	#     my($a, $b) = @$x;
-	#     print "$a>>>@$b>>>\n";
-	# }
-
 	my $script = &create_replace_script_($host, %rep_info);
     }
     
@@ -222,7 +238,7 @@ sub do_build_{
 
 
     my($lib, $bin, $conf, $archive);
-    my $prod = "opt/prod";
+    $prod = $install_dir;
 
     if($ver eq ""){
 	$lib = "$prod/lib";
@@ -240,9 +256,9 @@ sub do_build_{
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
     &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
-    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod");
-    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod");
-    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/opt/prod", \%deps, @dirs);
+    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
+    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
+    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/$prod", \%deps, @dirs);
 }
 
 
@@ -294,7 +310,7 @@ target_user=\$1
 target_host=\$2
 target_top=\$3
 
-find opt -type f | sed -e 's/^/\$target_top\//' |ssh -t \$target_user\@\$target_host sudo xargs rm -f
+find $install_top -type f | sed -e 's/^/\$target_top\//' |ssh -t \$target_user\@\$target_host sudo xargs rm -f
 END_OF_PURGE
 }
 
@@ -312,7 +328,7 @@ rep_script=\$4
 
 scp $archive \$target_user\@\$target_host:$archive
 ssh -t \$target_user\@\$target_host tar xvzf $archive
-scp \$rep_script \$target_user\@\$target_host:opt
+scp \$rep_script \$target_user\@\$target_host:$install_top
 ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \$target_user \$target_top \$rep_script
 END_OF_DEPLOY
 #    print "$content";
@@ -344,17 +360,17 @@ sub collect_config{
 
 	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
 	    if($path=~    m|((.+/)?([^\/]+))/bin/(.+\.sh)$|){
-		($tag, $dir, $from, $to, $mode) = ("sh", &l($1), "$4", "opt/prod/$dir/bin/", "0755");
+		($tag, $dir, $from, $to, $mode) = ("sh", &l($1), "$4", "$prod/$dir/bin/", "0755");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/bin/([^\.]+$)|){     #startup script
-		($tag, $dir, $from, $to, $mode) = ("startup", &l($1), "$4", "etc/init.d/", "0644");
+		($tag, $dir, $from, $to, $mode) = ("startup", &l($1), "$4", "$prod/etc/init.d/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(logback.xml)|){
-		($tag, $dir, $from, $to, $mode) = ("logback", &l($1), "$4", "opt/prod/$dir/config/", "0644");
+		($tag, $dir, $from, $to, $mode) = ("logback", &l($1), "$4", "$prod/$dir/config/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.properties)|){
-		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "opt/prod/$dir/config//", "0644");
+		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "$prod/$dir/config//", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.cron)|){
-		($tag, $dir, $from, $to, $mode) = ("cron",&l($1), "$4", "opt/prod/$dir/config/", "0644");
+		($tag, $dir, $from, $to, $mode) = ("cron",&l($1), "$4", "$prod/$dir/config/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/sql/(.+.sql)|){
-		($tag, $dir, $from, $to, $mode) = ("sql", &l($1), "$4", "opt/prod/$dir/sql/", "0644");
+		($tag, $dir, $from, $to, $mode) = ("sql", &l($1), "$4", "$prod/$dir/sql/", "0644");
 	    }else{
 		next;
 	    }
@@ -444,7 +460,7 @@ sub run_mvn{
 sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
-    &run_("$TAR cvzf $archive opt 2>&1 ");
+    &run_("$TAR cvzf $archive $install_top 2>&1 ");
     
     chdir $cwd or die "cd $cwd";
 }
@@ -799,11 +815,11 @@ sub read_global_settings{
     if($global{"Host"} eq ""){
 	die "Host not defiend in config file";
     }
-    if($global{"Root"} eq ""){
-	die "Root not defiend in config file";
+    if($global{"Top"} eq ""){
+	die "Top not defiend in config file";
     }
     
-    return ($global{"User"}, $global{"Host"}, $global{"Root"});
+    return ($global{"User"}, $global{"Host"}, $global{"Top"});
 }
 
 sub mk_conf{
@@ -858,12 +874,47 @@ sub create_replace_script_{
     return "$host.sh";
 }
 
+sub set_install_dir{
+    my %config = &read_build_config();
+    if(!defined($config{"install_dir"})){
+	die "No install_dir is defined in $BUILD_CONFIG $config{'install_dir'}";
+    }
+    $install_dir = $config{"install_dir"};
+    $install_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
+    my @path = split /\//, $install_dir;
+    $install_top = $path[0];
+}
+
+sub write_build_config{
+    my(%c) = @_;
+    open(my $F, ">$BUILD_CONFIG") or die "cannot create $BUILD_CONFIG .";
+    foreach my $k (keys %c){
+	print $F "$k:$c{$k}\n";
+    }
+    close($F);
+}
+
+sub read_build_config{
+    my(%c) = @_;
+    open(my $F, "$BUILD_CONFIG") or die "cannot open $BUILD_CONFIG .";
+    while(my $l = <$F>){
+	chomp $l;
+	my ($k, $v) = split /:/, $l;
+	if(defined($k) and defined($v)){
+	    $c{$k} = $v;
+	}
+    }
+    close($F);
+    return %c;
+}
+
 
 sub usage_{
     my($prog) = @_;
     print STDERR <<"END_OF_USAGE";
 usage:$prog fetch                           # fetch jdk and apache-maven
       $prog setup jdk.tar.gz maven.tar.gz   # setup mvn script for our build environemnt
+      $prog prepare top_dir                 # setup top directory
       $prog checkout url                    # checkout latest source from url
       $prog tag-checkout tag url            # checkout latest source from url with tag
       $prog rev-checkout rev url            # checkout latest source from url with rev
@@ -883,7 +934,7 @@ __END__
 #config file
 User:
 Host:
-Root:
+Top:
 
 [file1]
 string--->replacement
