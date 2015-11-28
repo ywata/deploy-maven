@@ -6,7 +6,7 @@ use strict "refs";
 use strict "subs";
 use warnings;
 
-my @Bins = ("/bin/", "/usr/bin/");
+my @BINS = ("/bin/", "/usr/bin/");
 my $TAR = "tar";
 my $SVN = "svn";
 my $RM  = "/bin/rm";
@@ -19,9 +19,8 @@ my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
 my $BUILD_CONFIG       = ".build_config";
 my $CHROOT = "chroot";
+
 my $root = "bitnami.bitnami";
-
-
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
 
@@ -32,10 +31,10 @@ my $install_top;
 #my $prod = "prod";
 my $prod;
 
-$TAR = &findFile($TAR, @Bins);
-$SVN = &findFile($SVN, @Bins);
-$CURL = &findFile($CURL, @Bins);
-$INSTALL = &findFile($INSTALL, @Bins);
+$TAR = &findFile($TAR, @BINS);
+$SVN = &findFile($SVN, @BINS);
+$CURL = &findFile($CURL, @BINS);
+$INSTALL = &findFile($INSTALL, @BINS);
 
 chomp(my $build_started = `date "+%Y%m%d-%H%M"`);#chomp($build_started);
 chomp(my $cwd = `pwd`); # /bin/pwd
@@ -194,6 +193,11 @@ sub do_deploy_{
     foreach my $repfile (@configs){
 	my($user, $host, $top, %rep_info) = &read_config($repfile); #%rep_info ($op, $from, $to, $reps);
 	my $script = &create_replace_script_($host, %rep_info);
+
+	print STDERR "starting deployment for $host\n";
+	sleep 1;
+	&run_("scp $script $staging_user\@$staging_host:$install_top");
+	
     }
     
 }
@@ -234,7 +238,7 @@ sub do_build_{
     }
 
 #    print ">>>>>>>@dirs \n";
-    my @confs = &get_confs("conf", @dirs);
+#    my @confs = &get_confs("conf", @dirs);
 
 
     my($lib, $bin, $conf, $archive);
@@ -254,7 +258,7 @@ sub do_build_{
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
-    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
+#    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
@@ -366,7 +370,7 @@ sub collect_config{
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(logback.xml)|){
 		($tag, $dir, $from, $to, $mode) = ("logback", &l($1), "$4", "$prod/$dir/config/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.properties)|){
-		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "$prod/$dir/config//", "0644");
+		($tag, $dir, $from, $to, $mode) = ("prop", &l($1), "$4", "$prod/$dir/config/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.cron)|){
 		($tag, $dir, $from, $to, $mode) = ("cron",&l($1), "$4", "$prod/$dir/config/", "0644");
 	    }elsif($path=~ m|((.+/)?([^\/]+))/sql/(.+.sql)|){
@@ -375,10 +379,11 @@ sub collect_config{
 		next;
 	    }
 	    next if( ! -f "$dir/pom.xml");
+	    $to =~ s|//|/|g;
 
 
-	    print "$to\n";
-	    if(! -d "$CHROOT/to"){
+	    print ">>dir=$dir from=$from to=$to\n";
+	    if(! -d "$CHROOT/$to"){
 		print "$path $dir $from $to\n";
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
@@ -507,7 +512,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-    print "$inst\n";
+#    print "$inst\n";
     &run_($inst);
 }
 
@@ -538,7 +543,7 @@ sub install_files_{
 }
 
 
-sub get_conf{
+sub get_conf_{
     my($conf, $dir) = @_;
     my @confs;
     open(my $FIND, "find $dir -type d -name conf |") or die "find failed for open";
@@ -829,7 +834,7 @@ sub mk_cron{
 sub mk_script{
 }
 
-sub replace_script_{
+sub replace_command_{
     my($file, $op, $from, $to, @rest) = @_;### Ugly hack!
     print "<$op> $from $to\n";    
     my($content);
@@ -855,7 +860,7 @@ top=\$1
 
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
-mv \$f $to
+install \$f $to
 END_OF_SCRIPT
 }
 
@@ -866,12 +871,16 @@ sub create_replace_script_{
     foreach my $f (keys %reps){
 	my($x) = $reps{$f};
 	my($op, $from, $to, $rest) = @$x;
-#	print "@$rest\n";
-	$content .= &replace_script_($f, $op, $from, $to, @$rest);
+
+	if($from =~ m|$install_dir|){
+	    $content .= &replace_command_($f, $op, $from, $to, @$rest);
+	}else{
+	    die "$from should be in $install_dir";
+	}
     }
 
     &create_script_($CHROOT, "$host.sh", $content);
-    return "$host.sh";
+    return "$CHROOT/$host.sh";
 }
 
 sub set_install_dir{
