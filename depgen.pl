@@ -241,32 +241,30 @@ sub do_build_{
 #    my @confs = &get_confs("conf", @dirs);
 
 
-    my($lib, $bin, $conf, $archive);
+    my($lib, $bin, $archive);
 
     if($ver eq ""){
 	$lib = "$prod/lib";
 	$bin = "$prod/bin";
-	$conf = "$prod/conf";
 	$archive = "archive.tar.gz";
     }else{
 	$lib = "$prod/lib.$ver";
 	$bin = "$prod/bin";
-	$conf = "$prod/conf";
 	$archive = "archive.$ver.tar.gz";
     }
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
-    &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$conf", "$CHROOT/$lib");
+    &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$lib");
 #    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
-    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
-    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $conf, $archive, "$CHROOT/$prod");
-    &create_archive($tag, $ver, $lib, $bin, $conf, $archive, "$CHROOT/$prod", \%deps, @dirs);
+    &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
+    &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
+    &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%deps, @dirs);
 }
 
 
 sub create_deploy_self_{
-    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
+    my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_self.sh";
 
@@ -281,17 +279,17 @@ echo "\$user \$top \$rep_script"
 mkdir \$top
 
 home="~\$user"
-sudotar="sudo tar xozf \$home/$archive -C \$top"
+
+sudotar="sudo tar xozf \$home/$CHROOT/$archive -C \$top"
 eval \$sudotar   # be careful not to supply unnecessary thing
 
 sudo \$rep_script \$top
-sudo $bin/ch.sh \$top
+sudo $CHROOT/$bin/ch.sh \$top
 
 
 if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
-
 sudo ln -s \$top/$lib \$top/$prod/lib
 
 END_OF_DEPLOY
@@ -319,7 +317,7 @@ END_OF_PURGE
 }
 
 sub create_deploy_one_{
-    my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
+    my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     chomp($lib);
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
@@ -331,19 +329,20 @@ target_host=\$2
 target_top=\$3
 rep_script=\$4
 
-scp $archive \$target_user\@\$target_host:$archive
-ssh -t \$target_user\@\$target_host tar xvzf $archive
-scp \$rep_script \$target_user\@\$target_host:$install_top
-ssh -t \$target_user\@\$target_host $bin/deploy_self.sh \$target_user \$target_top \$rep_script
+ssh \$target_user\@\$target_host mkdir $CHROOT
+scp $archive \$target_user\@\$target_host:$CHROOT
+ssh -t \$target_user\@\$target_host tar xvzf $archive -C $CHROOT
+scp \$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
+ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top \$rep_script
 END_OF_DEPLOY
 #    print "$content";
     &create_script_("$CHROOT/$bin", $sh, $content);
 }
 
 sub create_archive{
-    my($tag, $ver, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
+    my($tag, $ver, $lib, $bin, $archive, $prod, $deps, @dirs)  = @_;
     my %deps = %$deps;
-    &collect_config($conf, @dirs);
+    &collect_config(@dirs);
     &collect_jar($lib, $deps, @dirs);
     &create_change_mode_owner_($bin, "ch.sh");
     
@@ -357,7 +356,7 @@ sub l{
     return "$path[-1]";
 }
 sub collect_config{
-    my($conf, @dirs) = @_;
+    my(@dirs) = @_;
     foreach my $d (@dirs){
 	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
@@ -524,7 +523,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-    print "<$inst> <$from> <$to>\n";
+#    print "<$inst> <$from> <$to>\n";
     &run_($inst);
 }
 
@@ -576,7 +575,7 @@ sub get_conf_{
     return \@confs;
 }
 
-sub get_confs{
+sub get_confs_{
     my($conf, @dirs) = @_;
     my @confs;
     foreach my $d (@dirs){
@@ -950,6 +949,8 @@ sub read_build_config{
 
 sub usage_{
     my($prog) = @_;
+    my @path = split /\//, $prog;
+    $prog = $path[-1];
     print STDERR <<"END_OF_USAGE";
 usage:$prog fetch                           # fetch jdk and apache-maven
       $prog setup jdk.tar.gz maven.tar.gz   # setup mvn script for our build environemnt
@@ -960,6 +961,7 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog build dir (dirs...)             # build and archive files in local directory
       $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
       $prog deploy staging-user staging-host config (config...)       # deploy files on hosts
+      $prog clean  staging-user staging-host config (config...)       # clean installed files
       $prog create-table staging-user staging-host [configs]          # currently not implemented
       $prog upload-table staging-user staging-host [configs]          # currently not implemented
       $prog help
