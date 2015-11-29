@@ -861,29 +861,6 @@ sub replace_command_{
     
     foreach my $rep (@rest){
 	print "$rep ";
-	if($op eq "CONF" or $op eq "SCRIPT"){
-	    return <<"END_OF_SCRIPT";
-top=\$1
-
-f=\`mktemp tmp.XXXXX\`
-sed -e \'$content \' $file > \$f
-install -d $dir
-mv \$f $to
-END_OF_SCRIPT
-	}elsif($op eq "CRON"){
-	    return <<"END_OF_SCRIPT";
-top=\$1
-
-f=\`mktemp tmp.XXXXX\`
-sed -e \'$content \' $file > \$f
-install -d $dir
-mv \$f $to
-END_OF_SCRIPT
-	    
-	}else{
-	    die "unknown op <$op> found";
-	}
-
 	my($left, $right) = split(/-->/, $rep);
 	if($right eq ""){
 	    die "config file format error $rep";
@@ -891,7 +868,28 @@ END_OF_SCRIPT
 	    $content .= "s|^$left\$|$right|;"
 	}
     }
-    print "\n";
+    if($op eq "CONF" or $op eq "SCRIPT"){
+	return <<"END_OF_SCRIPT";
+top=\$1
+
+f=\`mktemp tmp.XXXXX\`
+sed -e \'$content \' $CHROOT/$file > \$f
+install -d $dir
+mv \$f $to
+END_OF_SCRIPT
+    }elsif($op eq "CRON"){
+	return <<"END_OF_SCRIPT";
+top=\$1
+
+f=\`mktemp tmp.XXXXX\`
+sed -e \'$content \' $CHROOT/$file > \$f
+install -d $dir
+mv \$f $to
+END_OF_SCRIPT
+	    
+    }else{
+	die "unknown op <$op> found";
+    }
 }
 
 # Needs some investigation for security.
