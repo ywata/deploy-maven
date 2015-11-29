@@ -287,7 +287,8 @@ eval \$sudotar   # be careful not to supply unnecessary thing
 sudo \$rep_script \$top
 sudo $bin/ch.sh \$top
 
-if [ -L $prod/lib ]; then
+
+if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
 
@@ -352,43 +353,44 @@ sub create_archive{
 sub l{
     my($path) = @_;
     my(@path) = split(/\//, $path);
+
     return "$path[-1]";
 }
 sub collect_config{
     my($conf, @dirs) = @_;
     foreach my $d (@dirs){
+	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(my $path = <$FIND>){
 	    chomp $path;
 
 	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
-	    if($path=~    m|((.+/)?([^\/]+))/bin/(.+\.sh)$|){
-		($tag, $dir, $from, $mode) = ("sh", &l($1), "$4", "0755");
+	    $path =~ s|^\.\/||; # strip ./
+	    if($path=~    m|(.+)/bin/(.+\.sh)$|){
+		($tag, $dir, $from, $mode) = ("sh", &l($1), "$2", "0755");
 		$to = "$prod/$dir/bin";
-	    }elsif($path=~ m|((.+/)?([^\/]+))/bin/([^\.]+$)|){     #startup script
-		($tag, $dir, $from, $mode) = ("startup", &l($1), "$4",  "0644");
+	    }elsif($path=~ m|(.+)/bin/([^\.]+$)|){     #startup script
+		($tag, $dir, $from, $mode) = ("startup", &l($1), "$2",  "0644");
 		$to = "etc/init.d/";
-	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(logback.xml)|){
-		($tag, $dir, $from, $mode) = ("logback", &l($1), "$4", "0644");
+	    }elsif($path=~ m|(.+)/config/(logback.xml)|){
+		($tag, $dir, $from, $mode) = ("logback", &l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.properties)|){
-		($tag, $dir, $from, $mode) = ("prop", &l($1), "$4", "0644");
+	    }elsif($path=~ m|(.+)/config/(.+\.properties)|){
+		($tag, $dir, $from, $mode) = ("prop", &l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|((.+/)?([^\/]+))/config/(.+\.cron)|){
-		($tag, $dir, $from, $mode) = ("cron",&l($1), "$4", "0644");
+	    }elsif($path=~ m|(.+)/config/(.+\.cron)|){
+		($tag, $dir, $from, $mode) = ("cron",&l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|((.+/)?([^\/]+))/sql/(.+.sql)|){
-		($tag, $dir, $from, $mode) = ("sql", &l($1), "$4", "0644");
+	    }elsif($path=~ m|(.+)/sql/(.+.sql)|){
+		($tag, $dir, $from, $mode) = ("sql", &l($1), "$2", "0644");
 		$to =  "$prod/$dir/sql/";
 	    }else{
-		
 		next;
 	    }
-	    print ">>>>$path $dir $from $to\n";
+#	    print ">>>>$path $dir $from $to\n";
 	    next if( ! -f "$dir/pom.xml");
 	    $to =~ s|//|/|g;
 
-	    print ">>>>$path $dir $from $to\n";
 	    if(! -d "$CHROOT/$to"){
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
@@ -419,6 +421,7 @@ sub collect_jar{
 		#		print "Warning $_\n";
 		next;
 	    }
+	    $where = &l($where);
 	    my($w) = "$CHROOT/$lib/$where";
 	    
 	    $target =~ m|([^/]+)$|;
@@ -857,7 +860,7 @@ top=\$1
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
 install -d $dir
-install \$f $to
+mv \$f $to
 END_OF_SCRIPT
 	}elsif($op eq "CRON"){
 	    return <<"END_OF_SCRIPT";
@@ -865,8 +868,8 @@ top=\$1
 
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $file > \$f
-install \$f $to
-
+install -d $dir
+mv \$f $to
 END_OF_SCRIPT
 	    
 	}else{
