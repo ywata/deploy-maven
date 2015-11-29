@@ -19,6 +19,7 @@ my $MAVEN_VER = "3.3.3";
 my $BUILD_VERSION_FILE = ".build_version";
 my $BUILD_CONFIG       = ".build_config";
 my $CHROOT = "chroot";
+my $CHROOTX = "$CHROOT" . "x";
 
 my $root = "bitnami.bitnami";
 my @install_params;
@@ -171,6 +172,7 @@ sub do_checkout_{
     }
 }
 
+
 sub do_transfer_{
     my($tag, $ver, $archive, $staging_user, $staging_host) = @_;
     my(@path) = split /\//, $archive;
@@ -180,8 +182,9 @@ sub do_transfer_{
     }else{
 	die "$archive not found.";
     }
-    &ssh_("rm -rf $install_top", "", $staging_user, $staging_host);
-    &ssh_("tar xvzf $path[-1]", "", $staging_user, $staging_host);
+    &ssh_("rm -rf $CHROOTX", " -t ", $staging_user, $staging_host);
+    &ssh_("mkdir $CHROOTX",  " -t ", $staging_user, $staging_host);
+    &ssh_("tar xvzf $path[-1] -C $CHROOTX", "", $staging_user, $staging_host);
 }
 
 sub do_deploy_{
@@ -190,14 +193,15 @@ sub do_deploy_{
 	&usage_($0);
     }
 
+    my($x)="x";
     foreach my $repfile (@configs){
 	my($user, $host, $top, %rep_info) = &read_config($repfile); #%rep_info ($op, $from, $to, $reps);
 	my $script = &create_replace_script_($host, %rep_info);
 
 	print STDERR "starting deployment for $host\n";
 	sleep 1;
-	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$install_top");
-	&ssh_("$prod/bin/deploy_one.sh $user $host $top $install_top/$script", " -t ", $staging_user, $staging_host);
+	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX");
+	&ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script", " -t ", $staging_user, $staging_host);
     }
     
 }
