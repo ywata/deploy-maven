@@ -343,7 +343,6 @@ END_OF_DEPLOY
 sub create_archive{
     my($tag, $ver, $lib, $bin, $conf, $archive, $prod, $deps, @dirs)  = @_;
     my %deps = %$deps;
-
     &collect_config($conf, @dirs);
     &collect_jar($lib, $deps, @dirs);
     &create_change_mode_owner_($bin, "ch.sh");
@@ -369,7 +368,7 @@ sub collect_config{
 	    $path =~ s|^\.\/||; # strip ./
 	    if($path =~    m|(.+)/bin/(.+\.sh)$|){
 		($tag, $dir, $from, $mode) = ("sh", &l($1), "$2", "0755");
-		$to = "$prod/$dir/bin";
+		$to = "$prod/$dir/bin/";
 	    }elsif($path =~ m|(.+)/bin/([^\.]+$)|){     #startup script
 		($tag, $dir, $from, $mode) = ("startup", &l($1), "$2",  "0644");
 		$to = "etc/init.d/";
@@ -396,6 +395,7 @@ sub collect_config{
 #		print ">>>$CHROOT/$to\n";		
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
+	    print "$path\n";
 	    &install_file_($root, $mode, $path, "$CHROOT/$to");
 
 	}
@@ -433,11 +433,10 @@ sub collect_jar{
 		#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
 		#		print "$target is OK $base $artifacts{$base}\n";
-		print "<$w>\n";
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
-		print "$w/$name <--- $target\n";
+#		print "$w/$name <--- $target\n";
 		&install_file_($root, "0644", $target, "$w/$name");
 	    }
 	}
@@ -854,7 +853,8 @@ sub replace_command_{
     my($content);
 
     my $dir = $to;
-    $dir =~ s/\[^\]+//;
+    $dir =~ s|[^\/]+$||;
+    print ">>> $dir $to\n";
     
     foreach my $rep (@rest){
 	print "$rep ";
