@@ -320,6 +320,7 @@ END_OF_PURGE
 
 sub create_deploy_one_{
     my($tag, $ver, $prod, $lib, $bin, $conf, $archive, @dirs)  = @_;
+    chomp($lib);
     my($lib_) = (split /\//, $lib)[-1];
     my($sh) = "deploy_one.sh";
 
@@ -366,32 +367,33 @@ sub collect_config{
 
 	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
 	    $path =~ s|^\.\/||; # strip ./
-	    if($path=~    m|(.+)/bin/(.+\.sh)$|){
+	    if($path =~    m|(.+)/bin/(.+\.sh)$|){
 		($tag, $dir, $from, $mode) = ("sh", &l($1), "$2", "0755");
 		$to = "$prod/$dir/bin";
-	    }elsif($path=~ m|(.+)/bin/([^\.]+$)|){     #startup script
+	    }elsif($path =~ m|(.+)/bin/([^\.]+$)|){     #startup script
 		($tag, $dir, $from, $mode) = ("startup", &l($1), "$2",  "0644");
 		$to = "etc/init.d/";
-	    }elsif($path=~ m|(.+)/config/(logback.xml)|){
+	    }elsif($path =~ m|(.+)/config/(logback.xml)|){
 		($tag, $dir, $from, $mode) = ("logback", &l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|(.+)/config/(.+\.properties)|){
+	    }elsif($path =~ m|(.+)/config/(.+\.properties)|){
 		($tag, $dir, $from, $mode) = ("prop", &l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|(.+)/config/(.+\.cron)|){
+	    }elsif($path =~ m|(.+)/config/(.+\.cron)|){
 		($tag, $dir, $from, $mode) = ("cron",&l($1), "$2", "0644");
 		$to = "$prod/$dir/config/";
-	    }elsif($path=~ m|(.+)/sql/(.+.sql)|){
+	    }elsif($path =~ m|(.+)/sql/(.+.sql)|){
 		($tag, $dir, $from, $mode) = ("sql", &l($1), "$2", "0644");
 		$to =  "$prod/$dir/sql/";
 	    }else{
 		next;
 	    }
-#	    print ">>>>$path $dir $from $to\n";
 	    next if( ! -f "$dir/pom.xml");
 	    $to =~ s|//|/|g;
 
+
 	    if(! -d "$CHROOT/$to"){
+#		print ">>>$CHROOT/$to\n";		
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
 	    &install_file_($root, $mode, $path, "$CHROOT/$to");
@@ -403,14 +405,15 @@ sub collect_config{
 
 sub collect_jar{
     my($lib, $deps, @dirs) = @_;
+
     foreach my $d (@dirs){
 	#	print "---> @$deps{$d} @$deps{$d}\n";
 	my %artifacts = &pack_conv($d, @$deps{$d});
 	
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
-	    my($where, $dep, $name, $target);
 	    chomp;
+	    my($where, $dep, $name, $target);
 	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
 		next;
 	    }elsif(m|(.+)/target/dependency/([^/]+\.jar)|){
@@ -430,10 +433,11 @@ sub collect_jar{
 		#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
 		#		print "$target is OK $base $artifacts{$base}\n";
+		print "<$w>\n";
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
-		#		print "$w/$name --> $target\n";
+		print "$w/$name <--- $target\n";
 		&install_file_($root, "0644", $target, "$w/$name");
 	    }
 	}
@@ -521,7 +525,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-#    print "$inst\n";
+    print "<$inst> <$from> <$to>\n";
     &run_($inst);
 }
 
@@ -735,6 +739,7 @@ sub readVersion_{
     my($f) = @_;
     open(my $F, "$f") or &get_tag(":");
     my($l) = <$F>;
+    chomp($l);
     close($F);
     my($R, $V) = &get_tag("$l");
     return($R, $V);
