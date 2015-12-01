@@ -178,6 +178,7 @@ sub do_transfer_{
     my(@path) = split /\//, $archive;
     
     if(-f $archive ){
+	print STDERR "scp $archive $staging_user\@$staging_host:";
 	&run_("scp $archive $staging_user\@$staging_host:");
     }else{
 	die "$archive not found.";
@@ -231,7 +232,7 @@ sub do_build_{
 
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-	&run_mvn("clean dependency:copy-dependencies package");
+	&run_mvn("clean dependency:copy-dependencies package -Dmaven.test.skip=true");
 	my @dp = &get_dependencies($d);
 	if(!defined($deps{$d})){
 	    $deps{$d} = \@dp;
@@ -429,6 +430,7 @@ sub collect_jar{
 	    }
 	    $where = &l($where);
 	    my($w) = "$CHROOT/$lib/$where";
+	    my($store) = "$CHROOT/$install_dir/libs/";
 	    
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
@@ -439,13 +441,30 @@ sub collect_jar{
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
+		if(! -d $store){
+		    &install_dir_($root, "0755", $store);
+		}
 #		print "$w/$name <--- $target\n";
-		&install_file_($root, "0644", $target, "$w/$name");
+#		&install_file_($root, "0644", $target, "$w/$name");
+		&install_file_($root, "0644", $target, "$store");
+		&link_file("$w", "$name", "../../libs/");
 	    }
 	}
 	close($FIND);
     }
 }
+
+sub link_file{
+    my($link_from_dir, $name, $link_to_dir) = @_;
+
+    print "$link_from_dir, $name, $link_to_dir \n";
+    chdir($link_from_dir) or die "cd $link_from_dir failed";
+
+    `ln -s $link_to_dir/$name .`;
+    die "symbolic link $link_to_dir/$name failed" if($?);
+    chdir($cwd) or die "cd $cwd failed";
+}
+
 
 sub pack_conv{
     my($d, @rest) = @_;
@@ -480,7 +499,21 @@ sub archive_{
     my($chroot, $archive)  = @_;
     chdir $chroot or die "cd $chroot failed";
     #    &run_("$TAR cvzf $archive $install_top 2>&1 ");
-    &run_("$TAR cvzf $archive . 2>&1 ");
+#    &run_("$TAR cvzf $archive . 2>&1 ");
+
+    my(@dirs);
+    open(my $LS, "ls |") or die "ls command failed";
+    while(my $l = <$LS>){
+	chomp $l;
+	if( -d $l){
+	    push @dirs, $l;
+	}
+    }
+    if($#dirs < 0){
+	die "no directries for archiving";
+    }
+
+    &run_("$TAR cvzf $archive @dirs");
     
     chdir $cwd or die "cd $cwd";
 }
