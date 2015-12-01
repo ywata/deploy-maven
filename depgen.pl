@@ -424,6 +424,9 @@ sub collect_jar{
 		($where, $dep, $name, $target) = ($1, 1, $2, $_);
 	    }elsif(m|(.+)/target/([^/]+\.jar)|){
 		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+#	    }elsif(m|(.+)/target.+/([^/]+\.war)|){
+	    }elsif(m|(.+)/target/([^/]+\.war)|){
+		($where, $dep, $name, $target) = ($1, 0, $2, $_);
 	    }else{
 		#		print "Warning $_\n";
 		next;
