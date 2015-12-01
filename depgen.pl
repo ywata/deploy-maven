@@ -295,7 +295,7 @@ sudo $CHROOT/$bin/ch.sh \$top
 if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
-sudo ln -s \$top/$lib \$top/$prod/lib
+sudo ln -s $lib_ \$top/$prod/lib
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
