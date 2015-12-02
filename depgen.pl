@@ -22,12 +22,14 @@ my $CHROOT = "chroot";
 my $CHROOTX = "$CHROOT" . "x";
 
 my $root = "bitnami.bitnami";
+my $tomcat = "bitnami.bitnami";
+
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
 
 my $install_dir;
 my $install_top;
-
+my $tomcat_dir;
 
 #my $prod = "prod";
 my $prod;
@@ -85,15 +87,15 @@ sub dispatch_{
 	my($opt) = "checkout  -r " . shift @argv;
 	&do_checkout_($opt, @argv);
     }elsif(($ARGV[0] eq "build")){
-	&set_install_dir();	
+	&set_build_config();	
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
     }elsif(($ARGV[0] eq "transfer")){
-	&set_install_dir();
+	&set_build_config();
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_transfer_($t, $v, @argv);
     }elsif(($ARGV[0] eq "deploy")){
-	&set_install_dir();
+	&set_build_config();
 	&do_deploy_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
@@ -121,9 +123,9 @@ HELP
 
 sub do_prepare_{
     my(@config) = @_;
-    &usage_($0) if($#config != 0);
+    &usage_($0) if($#config != 1);
 
-    &write_build_config("install_dir" => $config[0]);
+    &write_build_config("install_dir" => $config[0], "tomcat_dir" => $config[1]);
 }
 
 #
@@ -417,22 +419,22 @@ sub collect_jar{
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
 	    chomp;
-	    my($where, $dep, $name, $target);
+	    my($module, $dep, $name, $target, $pack);
 	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
 		next;
 	    }elsif(m|(.+)/target/dependency/([^/]+\.jar)|){
-		($where, $dep, $name, $target) = ($1, 1, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 1, $2, $_, "jar");
 	    }elsif(m|(.+)/target/([^/]+\.jar)|){
-		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 0, $2, $_, "jar");
 #	    }elsif(m|(.+)/target.+/([^/]+\.war)|){
 	    }elsif(m|(.+)/target/([^/]+\.war)|){
-		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 0, $2, $_, "war");
 	    }else{
 		#		print "Warning $_\n";
 		next;
 	    }
-	    $where = &l($where);
-	    my($w) = "$CHROOT/$lib/$where";
+	    $module = &l($module);
+	    my($w) = "$CHROOT/$lib/$module";
 	    my($store) = "$CHROOT/$install_dir/libs/";
 	    
 	    $target =~ m|([^/]+)$|;
@@ -443,16 +445,23 @@ sub collect_jar{
 	    }else{
 #		print ">>>$target is OK $base $artifacts{$base}\n";
 		
-		if(! -d $w){
-		    &install_dir_($root, "0755", $w);
+		if($pack eq "war"){
+		    # War file will be
+		    if(! -d "$CHROOT/$tomcat_dir"){
+			&install_dir_($tomcat, "0755", "$CHROOT/$tomcat_dir");
+		    }
+		    &install_file_($tomcat, "0755", $target, "$CHROOT/$tomcat_dir");
+		}else{
+		    # Jar file !
+		    if(! -d $w){
+			&install_dir_($root, "0755", $w);
+		    }
+		    if(! -d $store){
+			&install_dir_($root, "0755", $store);
+		    }
+		    &install_file_($root, "0644", $target, "$store");
+		    &link_file("$w", "$name", "../../libs/");
 		}
-		if(! -d $store){
-		    &install_dir_($root, "0755", $store);
-		}
-#		print "$w/$name <--- $target\n";
-#		&install_file_($root, "0644", $target, "$w/$name");
-		&install_file_($root, "0644", $target, "$store");
-		&link_file("$w", "$name", "../../libs/");
 	    }
 	}
 	close($FIND);
@@ -950,17 +959,23 @@ sub create_replace_script_{
     return "$host.sh";
 }
 
-sub set_install_dir{
+sub set_build_config{
     my %config = &read_build_config();
     if(!defined($config{"install_dir"})){
 	die "No install_dir is defined in $BUILD_CONFIG $config{'install_dir'}";
     }
+    if(!defined($config{"tomcat_dir"})){
+	die "No tomcat_dir is defined in $BUILD_CONFIG $config{'install_dir'}";
+    }
+    
     $install_dir = $config{"install_dir"};
     $install_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
     my @path = split /\//, $install_dir;
     $install_top = $path[0];
     $prod = $install_dir;
     
+    $tomcat_dir = $config{"tomcat_dir"};
+    $tomcat_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
 }
 
 sub write_build_config{
@@ -986,7 +1001,6 @@ sub read_build_config{
     return %c;
 }
 
-
 sub usage_{
     my($prog) = @_;
     my @path = split /\//, $prog;
@@ -994,7 +1008,7 @@ sub usage_{
     print STDERR <<"END_OF_USAGE";
 usage:$prog fetch                           # fetch jdk and apache-maven
       $prog setup jdk.tar.gz maven.tar.gz   # setup mvn script for our build environemnt
-      $prog prepare top_dir                 # setup top directory
+      $prog prepare top_dir tomcat_dir      # setup top directory and tomcat war file directory
       $prog checkout url                    # checkout latest source from url
       $prog tag-checkout tag url            # checkout latest source from url with tag
       $prog rev-checkout rev url            # checkout latest source from url with rev
