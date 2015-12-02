@@ -437,10 +437,12 @@ sub collect_jar{
 	    
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
-	    if($artifacts{$base} eq "test"){
-		#		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
+
+	    if(defined($artifacts{$base}) and $artifacts{$base} eq "test"){
+		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
-		#		print "$target is OK $base $artifacts{$base}\n";
+#		print ">>>$target is OK $base $artifacts{$base}\n";
+		
 		if(! -d $w){
 		    &install_dir_($root, "0755", $w);
 		}
@@ -460,7 +462,7 @@ sub collect_jar{
 sub link_file{
     my($link_from_dir, $name, $link_to_dir) = @_;
 
-    print "$link_from_dir, $name, $link_to_dir \n";
+#    print "$link_from_dir, $name, $link_to_dir \n";
     chdir($link_from_dir) or die "cd $link_from_dir failed";
 
     `ln -s $link_to_dir/$name .`;
