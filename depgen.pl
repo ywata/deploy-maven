@@ -97,6 +97,8 @@ sub dispatch_{
     }elsif(($ARGV[0] eq "deploy")){
 	&set_build_config();
 	&do_deploy_(@argv);
+    }elsif(($ARGV[0] eq "ssh")){
+	&do_ssh_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
@@ -189,6 +191,15 @@ sub do_transfer_{
     &ssh_("mkdir $CHROOTX",  " -t ", $staging_user, $staging_host);
     &ssh_("tar xvzf $path[-1] -C $CHROOTX", "", $staging_user, $staging_host);
 }
+sub do_ssh_{
+    my($staging_user, $staging_host, @configs) = @_;
+    if($#configs != 0){
+	&usage_("$0 $#configs");
+    }
+    my($user, $host) = &read_config($configs[0]); #%rep_info ($op, $from, $to, $reps);
+    &ssh2("ssh -t $user\@$host", $staging_user, $staging_host);
+}
+
 
 sub do_deploy_{
     my($staging_user, $staging_host, @configs) = @_;
@@ -270,6 +281,7 @@ sub do_build_{
 }
 
 
+
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
@@ -298,6 +310,20 @@ if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
 sudo ln -s $lib_ \$top/$prod/lib
+
+crons=`find $CHROOT -name "*.cron" `
+tmp=`mktemp tmp.XXXX`
+
+cat <<END>\$tmp
+# Registering cron job needs much care, since crontab -r removes all
+# the job registered for the user. It is recommended that you check
+# current registration with crontab -l and decide what should be done
+# If it is not registed, this shell script can help you a bit.
+# crontab -l # to check the current jobs
+# crontab crons
+END
+cat \$crons >> \$tmp
+mv \$tmp crons
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -657,6 +683,11 @@ sub get_dependencies{
     return @deps;
 }
 
+sub ssh2{
+    my($command, $user, $host) = @_;
+#    print "ssh -t $user\@$host $command\n";
+    exec "ssh -t $user\@$host $command";
+}
 sub ssh_{
     my($command, $opt, $user,  @hosts) = @_;
     print STDERR "ssh $user $command --> @hosts\n";
@@ -1018,6 +1049,7 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog clean  staging-user staging-host config (config...)       # clean installed files
       $prog create-table staging-user staging-host [configs]          # currently not implemented
       $prog upload-table staging-user staging-host [configs]          # currently not implemented
+      $prog ssh config                                                # currently not implemented
       $prog help
 END_OF_USAGE
 
