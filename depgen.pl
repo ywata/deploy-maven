@@ -527,9 +527,10 @@ sub get_deps_{
 	die "No pom.xml found. $d";
     }
     open(my $F, "mvn dependency:list |") or die "mvn failed";
-    while(<$F>){
-	my($module);
-	chomp;
+	my($module);    
+#    while(<$F>){
+#	my($module);
+#	chomp;
 	while(<$F>){
 	    chomp;	    
 
@@ -555,7 +556,7 @@ sub get_deps_{
 		last;
 	    }
 	}
-    }
+#    }
 #    chdir $cwd or die "cd $cwd failed";    
     close($F);
 
