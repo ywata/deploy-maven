@@ -244,7 +244,6 @@ sub do_build_{
     }
 
     &run_("rm -rf \$HOME/.m2/repository/com"); #XXXX
-
     my %artifacts;
 
     my @dirs2 = &find_pom_dirs(@dirs);
@@ -440,11 +439,11 @@ sub collect_config{
 
 sub collect_jar{
     my($lib, $art, @dirs) = @_;
-
     my %artifacts = %$art;
 #    for my $k (keys %artifacts){
 #	print "$k\n";
 #    }
+
     foreach my $d (@dirs){
 	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
@@ -498,6 +497,7 @@ sub collect_jar{
 		    &link_file("$w", "$name", "../../libs/");
 		}
 	    }
+
 	}
 	close($FIND);
     }
@@ -578,9 +578,6 @@ sub find_pom_dirs{
     close($FIND);
     return @r;
 }
-
-
-
 
 sub run_mvn{
     my($opt) = @_;
@@ -727,6 +724,7 @@ sub ssh2{
 #    print "ssh -t $user\@$host $command\n";
     exec "ssh -t $user\@$host $command";
 }
+
 sub ssh_{
     my($command, $opt, $user,  @hosts) = @_;
     print STDERR "ssh $user $command --> @hosts\n";
@@ -958,13 +956,6 @@ sub read_global_settings{
     }
     
     return ($global{"User"}, $global{"Host"}, $global{"Top"});
-}
-
-sub mk_conf{
-}
-sub mk_cron{
-}
-sub mk_script{
 }
 
 sub replace_command_{
