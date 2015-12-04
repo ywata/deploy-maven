@@ -61,7 +61,7 @@ sub dispatch_{
     }elsif($ARGV[0] eq "fetch"){
 	&do_fetch_(	   
 	     "http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz",
-	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz");
+	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/pache-maven-3.3.3-bin.tar.gz");
     }elsif($ARGV[0] eq "prepare"){
 	&do_prepare_(@argv);
     }elsif(($ARGV[0] eq "tag")){
@@ -222,6 +222,7 @@ sub do_deploy_{
 
 sub do_build_{
     my($tag, $ver, @dirs) = @_; 
+
     print STDERR "do_build_:@dirs\n";
     if($#dirs < 0){
 	&usage_($0);
@@ -241,20 +242,24 @@ sub do_build_{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
 
-    my %deps;
+    &run_("rm -rf \$HOME/.m2/repository/com"); #XXXX
+
+    my %artifacts;
 
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-	&run_mvn("clean dependency:copy-dependencies package -Dmaven.test.skip=true");
-	my @dp = &get_dependencies($d);
-	if(!defined($deps{$d})){
-	    $deps{$d} = \@dp;
-	}else{
-	    die "$d is already defined";
-	}
+	print "$d\n";
+	&run_mvn("clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+
+	my %artifacts = &get_deps($d, %artifacts); #
 	chdir $cwd || die "cd $cwd failed";
     }
 
+#    my %artifacts = &pack_conv2(\%deps, @dirs);
+
+#    foreach my $k (keys %artifacts){
+#	print "$k $artifacts{$k}\n";
+#    }
 #    print ">>>>>>>@dirs \n";
 #    my @confs = &get_confs("conf", @dirs);
 
@@ -273,11 +278,10 @@ sub do_build_{
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$lib");
-#    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
-    &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%deps, @dirs);
+    &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%artifacts, @dirs);
 }
 
 
@@ -285,7 +289,7 @@ sub do_build_{
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
-    my($sh) = "deploy_self.sh";
+    my($sh) = "eploy_self.sh";
 
     my $content =  << "END_OF_DEPLOY";
 # The script runs on target server.
@@ -373,10 +377,11 @@ END_OF_DEPLOY
 }
 
 sub create_archive{
-    my($tag, $ver, $lib, $bin, $archive, $prod, $deps, @dirs)  = @_;
-    my %deps = %$deps;
+    my($tag, $ver, $lib, $bin, $archive, $prod, $arts, @dirs)  = @_;
+
     &collect_config(@dirs);
-    &collect_jar($lib, $deps, @dirs);
+
+    &collect_jar($lib, $arts, @dirs);
     &create_change_mode_owner_($bin, "ch.sh");
     
     &archive_($CHROOT, $archive);
@@ -436,15 +441,23 @@ sub collect_config{
 }
 
 sub collect_jar{
-    my($lib, $deps, @dirs) = @_;
+    my($lib, $art, @dirs) = @_;
 
+    my %artifacts = %$art;
+#    for my $k (keys %artifacts){
+#	print "$k\n";
+#    }
+
+    print "1111111111111\n";
     foreach my $d (@dirs){
-	#	print "---> @$deps{$d} @$deps{$d}\n";
-	my %artifacts = &pack_conv($d, @$deps{$d});
-	
+	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
+	    if(m|jar$|){
+		print "$_";
+	    }
 	    chomp;
+
 	    my($module, $dep, $name, $target, $pack);
 	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
 		next;
@@ -466,29 +479,35 @@ sub collect_jar{
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
 
-	    if(defined($artifacts{$base}) and $artifacts{$base} eq "test"){
-		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
-	    }else{
-#		print ">>>$target is OK $base $artifacts{$base}\n";
-		
-		if($pack eq "war"){
-		    # War file will be
-		    if(! -d "$CHROOT/$tomcat_dir"){
-			&install_dir_($tomcat, "0755", "$CHROOT/$tomcat_dir");
-		    }
-		    &install_file_($tomcat, "0755", $target, "$CHROOT/$tomcat_dir");
+	    print "$module:$base>>>>>>\n";
+	    if(defined($artifacts{"$module:$base"})){
+		print "$module:$base!!!!\n";
+		if($artifacts{$base} eq "test"){
+		    print "####$target is used for test. Ignored. $base $artifacts{$base}\n";
 		}else{
-		    # Jar file !
-		    if(! -d $w){
-			&install_dir_($root, "0755", $w);
+		    print ">>>>$target is OK $base $artifacts{$base}\n";
+		    if($pack eq "war"){
+			# War file will be
+			if(! -d "$CHROOT/$tomcat_dir"){
+			    &install_dir_($tomcat, "0755", "$CHROOT/$tomcat_dir");
+			}
+			&install_file_($tomcat, "0755", $target, "$CHROOT/$tomcat_dir");
+		    }else{
+			# Jar file !
+			if(! -d $w){
+			    &install_dir_($root, "0755", $w);
+			}
+			if(! -d $store){
+			    &install_dir_($root, "0755", $store);
+			}
+			&install_file_($root, "0644", $target, "$store");
+			&link_file("$w", "$name", "../../libs/");
 		    }
-		    if(! -d $store){
-			&install_dir_($root, "0755", $store);
-		    }
-		    &install_file_($root, "0644", $target, "$store");
-		    &link_file("$w", "$name", "../../libs/");
 		}
+	    }else{
+		print "$module:$base####\n";
 	    }
+
 	}
 	close($FIND);
     }
@@ -506,17 +525,34 @@ sub link_file{
 }
 
 
+sub pack_conv2{
+    my($deps, @dirs) = @_;
+    my(%r);
+
+    foreach my $d (@dirs){
+	my %deps = %$deps;
+	my $r = $deps{$d};
+	foreach my $l (@$r){
+	    my ($module, $gId, $artId, $packType, $version, $scope) = split /:/, $l;
+	    my $target = "$module:$artId-$version.$packType";
+
+	    $r{$target} = $scope;
+	}
+    }
+    return %r;
+}
+
 sub pack_conv{
     my($d, @rest) = @_;
     my(%r);
-    
+
+    print "pack_conv: $d @rest\n";
 #    print "pack_conv\n";
     foreach my $s (@rest){
-#	print @rest;
+	print @rest;
 	foreach my $l (@$s){
-	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l; #/
-#	    print "$scope\n";
-	    my($target) = "$artId-$version.$packType";
+	    my($module, $gId, $artId, $packType, $version, $scope) = split /:/, $l; #/
+	    my($target) = "$module:$artId-$version.$packType";
 	    $r{$target} = $scope;
 #	    print "$target -> $scope\n";
 	}
@@ -524,9 +560,11 @@ sub pack_conv{
     return %r;
 }
 
+
 sub run_mvn{
     my($opt) = @_;
-    my($mvn) = "mvn $opt 2>&1 ";
+    my($mvn) = "mvn $opt ";
+#    print "$mvn\n";
     my $res = `$mvn`;
 #    my @res = split(/\n/, $res);
 
@@ -664,14 +702,16 @@ sub get_confs_{
 
 sub get_dependencies{
     my(@deps);
-    open(my $F, "mvn dependency:list |") or die "mvn failed";
+    open(my $F, "mvn dependency:resolve |") or die "mvn failed";
     if(! -f "pom.xml"){
 	die "No pom.xml found.";
     }
     while(<$F>){
+	print "### $_";
 	last if(m|^\[INFO\] The following files have been resolved:|);
     }
     while(<$F>){
+	print "#== $_";
 	if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 	    push @deps, $1;
 	}else{
@@ -681,6 +721,45 @@ sub get_dependencies{
     close($F);
 
     return @deps;
+}
+sub get_deps{
+    my($d, %artifacts) = @_;
+
+#    chdir $d or die "cd $d failed";
+    if(! -f "pom.xml"){
+	die "No pom.xml found. $d";
+    }
+    open(my $F, "mvn dependency:resolve |") or die "mvn failed";
+    while(<$F>){
+	my($module);
+	while(<$F>){
+	    if(m|^\[INFO\] Building ([^ ]+) |){
+		$module = $1;
+		last;
+	    }
+	}
+	while(<$F>){
+	    last if(m|^\[INFO\] The following files have been resolved:|);
+	}
+	while(<$F>){
+	    if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
+#		my($module, $gId, $artId, $packType, $version, $scope) = split /:/, $l; #/
+		my $target = "$module:$3-$5.$4";
+		print "$target -> $6\n";
+		$artifacts{$target} = $6;
+	    }else{
+		last;
+	    }
+	}
+    }
+    close($F);
+#    chdir $cwd or die "cd $cwd failed";
+
+    foreach my $k (keys %artifacts){
+	print "$k ====> $artifacts{$k}\n";
+    }
+
+    return %artifacts;
 }
 
 sub ssh2{
