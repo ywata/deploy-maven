@@ -22,12 +22,14 @@ my $CHROOT = "chroot";
 my $CHROOTX = "$CHROOT" . "x";
 
 my $root = "bitnami.bitnami";
+my $tomcat = "bitnami.bitnami";
+
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
 
 my $install_dir;
 my $install_top;
-
+my $tomcat_dir;
 
 #my $prod = "prod";
 my $prod;
@@ -59,7 +61,7 @@ sub dispatch_{
     }elsif($ARGV[0] eq "fetch"){
 	&do_fetch_(	   
 	     "http://download.oracle.com/otn-pub/java/jdk/8u60-b27/jdk-8u60-linux-x64.tar.gz",
-	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/apache-maven-3.3.3-bin.tar.gz");
+	     "http://ftp.tsukuba.wide.ad.jp/software/apache/maven/maven-3/3.3.3/binaries/pache-maven-3.3.3-bin.tar.gz");
     }elsif($ARGV[0] eq "prepare"){
 	&do_prepare_(@argv);
     }elsif(($ARGV[0] eq "tag")){
@@ -85,16 +87,18 @@ sub dispatch_{
 	my($opt) = "checkout  -r " . shift @argv;
 	&do_checkout_($opt, @argv);
     }elsif(($ARGV[0] eq "build")){
-	&set_install_dir();	
+	&set_build_config();	
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
     }elsif(($ARGV[0] eq "transfer")){
-	&set_install_dir();
+	&set_build_config();
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_transfer_($t, $v, @argv);
     }elsif(($ARGV[0] eq "deploy")){
-	&set_install_dir();
+	&set_build_config();
 	&do_deploy_(@argv);
+    }elsif(($ARGV[0] eq "ssh")){
+	&do_ssh_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
 	&do_get_license_(@argv);
     }elsif(($ARGV[0] eq "depend")){
@@ -113,7 +117,8 @@ HELP
 	&usage_($0);
     }elsif($ARGV[0] eq "purge"){
 	&do_purge_checkout_(@argv);
-
+    }elsif($ARGV[0] eq "test"){
+	&do_test_(@argv);
     }else{
 	&usage_($0);
     }
@@ -121,9 +126,9 @@ HELP
 
 sub do_prepare_{
     my(@config) = @_;
-    &usage_($0) if($#config != 0);
+    &usage_($0) if($#config != 1);
 
-    &write_build_config("install_dir" => $config[0]);
+    &write_build_config("install_dir" => $config[0], "tomcat_dir" => $config[1]);
 }
 
 #
@@ -187,6 +192,15 @@ sub do_transfer_{
     &ssh_("mkdir $CHROOTX",  " -t ", $staging_user, $staging_host);
     &ssh_("tar xvzf $path[-1] -C $CHROOTX", "", $staging_user, $staging_host);
 }
+sub do_ssh_{
+    my($staging_user, $staging_host, @configs) = @_;
+    if($#configs != 0){
+	&usage_("$0 $#configs");
+    }
+    my($user, $host) = &read_config($configs[0]); #%rep_info ($op, $from, $to, $reps);
+    &ssh2("ssh -t $user\@$host", $staging_user, $staging_host);
+}
+
 
 sub do_deploy_{
     my($staging_user, $staging_host, @configs) = @_;
@@ -209,6 +223,7 @@ sub do_deploy_{
 
 sub do_build_{
     my($tag, $ver, @dirs) = @_; 
+
     print STDERR "do_build_:@dirs\n";
     if($#dirs < 0){
 	&usage_($0);
@@ -228,24 +243,27 @@ sub do_build_{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
 
-    my %deps;
+    &run_("rm -rf \$HOME/.m2/repository/com"); #XXXX
 
-    foreach my $d (@dirs){
+    my %artifacts;
+
+    my @dirs2 = &find_pom_dirs(@dirs);
+    foreach my $d (@dirs2){
 	chdir $d || die "cd $d failed";
-	&run_mvn("clean dependency:copy-dependencies package -Dmaven.test.skip=true");
-	my @dp = &get_dependencies($d);
-	if(!defined($deps{$d})){
-	    $deps{$d} = \@dp;
-	}else{
-	    die "$d is already defined";
-	}
+	print "$d\n";
+	&run_mvn("clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+
+	my @triples = &get_deps_($d); #
 	chdir $cwd || die "cd $cwd failed";
+	foreach my $t (@triples){
+	    my($dir, $target, $scope) = @$t;
+	    $artifacts{"$dir:$target"} = $scope;
+	}
     }
-
-#    print ">>>>>>>@dirs \n";
-#    my @confs = &get_confs("conf", @dirs);
-
-
+    foreach my $k (keys %artifacts){
+	print "$k -> $artifacts{$k}\n";
+    }
+    
     my($lib, $bin, $archive);
 
     if($ver eq ""){
@@ -260,18 +278,18 @@ sub do_build_{
     &run_("$RM -rf $CHROOT");
     &mkdir_($CHROOT);
     &install_dir_($root, "0755", "$CHROOT/$bin", "$CHROOT/$lib");
-#    &install_files_($root, "0644", "$CHROOT/$conf", @confs);
     
     &create_deploy_self_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
-    &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%deps, @dirs);
+    &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%artifacts, @dirs);
 }
+
 
 
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
-    my($sh) = "deploy_self.sh";
+    my($sh) = "eploy_self.sh";
 
     my $content =  << "END_OF_DEPLOY";
 # The script runs on target server.
@@ -291,11 +309,24 @@ eval \$sudotar   # be careful not to supply unnecessary thing
 sudo \$rep_script \$top
 sudo $CHROOT/$bin/ch.sh \$top
 
-
 if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
 sudo ln -s $lib_ \$top/$prod/lib
+
+crons=`find $CHROOT -name "*.cron" `
+tmp=`mktemp tmp.XXXX`
+
+cat <<END>\$tmp
+# Registering cron job needs much care, since crontab -r removes all
+# the job registered for the user. It is recommended that you check
+# current registration with crontab -l and decide what should be done
+# If it is not registed, this shell script can help you a bit.
+# crontab -l # to check the current jobs
+# crontab crons
+END
+cat \$crons >> \$tmp
+mv \$tmp crons
 
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -336,8 +367,8 @@ rep_script=\$4
 
 ssh \$target_user\@\$target_host mkdir $CHROOT
 scp $archive \$target_user\@\$target_host:$CHROOT
-ssh -t \$target_user\@\$target_host tar xvzf $archive -C $CHROOT
-scp \$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
+ssh -t \$target_user\@\$target_host tar xzf $archive -C $CHROOT
+scp -t \$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
 ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top \$rep_script
 END_OF_DEPLOY
 #    print "$content";
@@ -345,10 +376,10 @@ END_OF_DEPLOY
 }
 
 sub create_archive{
-    my($tag, $ver, $lib, $bin, $archive, $prod, $deps, @dirs)  = @_;
-    my %deps = %$deps;
+    my($tag, $ver, $lib, $bin, $archive, $prod, $arts, @dirs)  = @_;
+
     &collect_config(@dirs);
-    &collect_jar($lib, $deps, @dirs);
+    &collect_jar($lib, $arts, @dirs);
     &create_change_mode_owner_($bin, "ch.sh");
     
     &archive_($CHROOT, $archive);
@@ -408,51 +439,64 @@ sub collect_config{
 }
 
 sub collect_jar{
-    my($lib, $deps, @dirs) = @_;
+    my($lib, $art, @dirs) = @_;
 
+    my %artifacts = %$art;
+#    for my $k (keys %artifacts){
+#	print "$k\n";
+#    }
     foreach my $d (@dirs){
-	#	print "---> @$deps{$d} @$deps{$d}\n";
-	my %artifacts = &pack_conv($d, @$deps{$d});
-	
+	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
+	    if(m|jar$|){
+		print "$_";
+	    }
 	    chomp;
-	    my($where, $dep, $name, $target);
+
+	    my($module, $dep, $name, $target, $pack);
 	    if(m|(.+)/target/.+jar-with-dependencies\.jar|){
 		next;
 	    }elsif(m|(.+)/target/dependency/([^/]+\.jar)|){
-		($where, $dep, $name, $target) = ($1, 1, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 1, $2, $_, "jar");
 	    }elsif(m|(.+)/target/([^/]+\.jar)|){
-		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 0, $2, $_, "jar");
 #	    }elsif(m|(.+)/target.+/([^/]+\.war)|){
 	    }elsif(m|(.+)/target/([^/]+\.war)|){
-		($where, $dep, $name, $target) = ($1, 0, $2, $_);
+		($module, $dep, $name, $target, $pack) = ($1, 0, $2, $_, "war");
 	    }else{
 		#		print "Warning $_\n";
 		next;
 	    }
-	    $where = &l($where);
-	    my($w) = "$CHROOT/$lib/$where";
+	    $module = &l($module);
+	    my($w) = "$CHROOT/$lib/$module";
 	    my($store) = "$CHROOT/$install_dir/libs/";
 	    
 	    $target =~ m|([^/]+)$|;
 	    my $base = $1;
 
-	    if(defined($artifacts{$base}) and $artifacts{$base} eq "test"){
-		print "$target is used for test. Ignored. $base $artifacts{$base}\n";
+	    my $combined_name = "$module:$base";
+	    if($artifacts{"$combined_name"} eq "test"){
+		print "####$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
-#		print ">>>$target is OK $base $artifacts{$base}\n";
-		
-		if(! -d $w){
-		    &install_dir_($root, "0755", $w);
+		print ">>>>$target is OK $base $artifacts{$base}\n";
+		if($pack eq "war"){
+		    # War file will be
+		    if(! -d "$CHROOT/$tomcat_dir"){
+			&install_dir_($tomcat, "0755", "$CHROOT/$tomcat_dir");
+		    }
+		    &install_file_($tomcat, "0755", $target, "$CHROOT/$tomcat_dir");
+		}else{
+		    # Jar file !
+		    if(! -d $w){
+			&install_dir_($root, "0755", $w);
+		    }
+		    if(! -d $store){
+			&install_dir_($root, "0755", $store);
+		    }
+		    &install_file_($root, "0644", $target, "$store");
+		    &link_file("$w", "$name", "../../libs/");
 		}
-		if(! -d $store){
-		    &install_dir_($root, "0755", $store);
-		}
-#		print "$w/$name <--- $target\n";
-#		&install_file_($root, "0644", $target, "$w/$name");
-		&install_file_($root, "0644", $target, "$store");
-		&link_file("$w", "$name", "../../libs/");
 	    }
 	}
 	close($FIND);
@@ -470,28 +514,78 @@ sub link_file{
     chdir($cwd) or die "cd $cwd failed";
 }
 
+sub do_test_{
+    my @dirs = &find_pom_dirs(@_);
+    print "@dirs\n";
+}
 
-sub pack_conv{
-    my($d, @rest) = @_;
-    my(%r);
-    
-#    print "pack_conv\n";
-    foreach my $s (@rest){
-#	print @rest;
-	foreach my $l (@$s){
-	    my($gId, $artId, $packType, $version, $scope) = split /:/, $l; #/
-#	    print "$scope\n";
-	    my($target) = "$artId-$version.$packType";
-	    $r{$target} = $scope;
-#	    print "$target -> $scope\n";
+sub get_deps_{
+    my($d) = @_;
+    my @r;
+#    chdir $d or die "cd $d failed";
+    if(! -f "pom.xml"){
+	die "No pom.xml found. $d";
+    }
+    open(my $F, "mvn dependency:list |") or die "mvn failed";
+    while(<$F>){
+	my($module);
+	chomp;
+	while(<$F>){
+	    chomp;	    
+
+	    if(m|^\[INFO\] Building ([^ ]+) |){
+		$module = $1;
+		last;
+	    }
+	}
+	while(<$F>){
+	    chomp;	    
+	    
+	    last if(m|^\[INFO\] The following files have been resolved:|);
+	}
+	while(<$F>){
+	    chomp;
+	    if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
+		my($gId, $artId, $packType, $version, $scope) = split /:/, $_; #/
+		my $target = "$3-$5.$4";
+		#		print "$target -> $6\n";
+		my @x = ($d, $target, $scope);
+		push @r, \@x;
+	    }else{
+		last;
+	    }
 	}
     }
-    return %r;
+#    chdir $cwd or die "cd $cwd failed";    
+    close($F);
+
+    return @r;
 }
+
+# supposed to be called after mvn compile is called
+sub find_pom_dirs{
+    my(@dir) = @_;
+    my(@r);
+    open(my $FIND, "find @dir -name pom.xml -type f|") or die "find failed";
+    while(<$FIND>){
+	chomp;
+	s/\/+pom\.xml$//;
+	push @r, $_;
+	if( -d "$_/target/"){
+	    push @r, $_;
+	}
+    }
+    close($FIND);
+    return @r;
+}
+
+
+
 
 sub run_mvn{
     my($opt) = @_;
-    my($mvn) = "mvn $opt 2>&1 ";
+    my($mvn) = "mvn $opt ";
+#    print "$mvn\n";
     my $res = `$mvn`;
 #    my @res = split(/\n/, $res);
 
@@ -627,27 +721,12 @@ sub get_confs_{
     return @confs;
 }
 
-sub get_dependencies{
-    my(@deps);
-    open(my $F, "mvn dependency:list |") or die "mvn failed";
-    if(! -f "pom.xml"){
-	die "No pom.xml found.";
-    }
-    while(<$F>){
-	last if(m|^\[INFO\] The following files have been resolved:|);
-    }
-    while(<$F>){
-	if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
-	    push @deps, $1;
-	}else{
-	    last;
-	}
-    }
-    close($F);
 
-    return @deps;
+sub ssh2{
+    my($command, $user, $host) = @_;
+#    print "ssh -t $user\@$host $command\n";
+    exec "ssh -t $user\@$host $command";
 }
-
 sub ssh_{
     my($command, $opt, $user,  @hosts) = @_;
     print STDERR "ssh $user $command --> @hosts\n";
@@ -950,17 +1029,23 @@ sub create_replace_script_{
     return "$host.sh";
 }
 
-sub set_install_dir{
+sub set_build_config{
     my %config = &read_build_config();
     if(!defined($config{"install_dir"})){
 	die "No install_dir is defined in $BUILD_CONFIG $config{'install_dir'}";
     }
+    if(!defined($config{"tomcat_dir"})){
+	die "No tomcat_dir is defined in $BUILD_CONFIG $config{'install_dir'}";
+    }
+    
     $install_dir = $config{"install_dir"};
     $install_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
     my @path = split /\//, $install_dir;
     $install_top = $path[0];
     $prod = $install_dir;
     
+    $tomcat_dir = $config{"tomcat_dir"};
+    $tomcat_dir =~ s|^(\/*)||; # strip / to allow possible misoperation.
 }
 
 sub write_build_config{
@@ -986,7 +1071,6 @@ sub read_build_config{
     return %c;
 }
 
-
 sub usage_{
     my($prog) = @_;
     my @path = split /\//, $prog;
@@ -994,7 +1078,7 @@ sub usage_{
     print STDERR <<"END_OF_USAGE";
 usage:$prog fetch                           # fetch jdk and apache-maven
       $prog setup jdk.tar.gz maven.tar.gz   # setup mvn script for our build environemnt
-      $prog prepare top_dir                 # setup top directory
+      $prog prepare top_dir tomcat_dir      # setup top directory and tomcat war file directory
       $prog checkout url                    # checkout latest source from url
       $prog tag-checkout tag url            # checkout latest source from url with tag
       $prog rev-checkout rev url            # checkout latest source from url with rev
@@ -1004,11 +1088,15 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog clean  staging-user staging-host config (config...)       # clean installed files
       $prog create-table staging-user staging-host [configs]          # currently not implemented
       $prog upload-table staging-user staging-host [configs]          # currently not implemented
+      $prog ssh config                                                # currently not implemented
       $prog help
 END_OF_USAGE
 
     exit 1;
 }
+
+
+
     
 
 __END__
