@@ -249,22 +249,28 @@ sub do_build_{
     &run_("rm -rf \$HOME/.m2/repository/com"); #XXXX
     my %artifacts;
 
-    my @dirs2 = &find_pom_dirs(@dirs);
-    foreach my $d (@dirs2){
+    foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
-	print "$d\n";
-	&run_mvn("clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+	print "$d:  mvn -X clean install dependency:copy-dependencies -Dmaven.test.skip=true\n";
+	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+	chdir $cwd || die "cd $cwd failed";
+    }
+    my @dirs2 = &find_pom_dirs(@dirs);
 
-	my @triples = &get_deps_($d); #
+    foreach my $d (@dirs2){
+	chdir $d || die "cd $d failed";	
+    	my @triples = &get_deps_($d); #
 	chdir $cwd || die "cd $cwd failed";
 	foreach my $t (@triples){
 	    my($dir, $target, $scope) = @$t;
-	    $artifacts{"$dir:$target"} = $scope;
+	    my($c) = &l($dir);
+	    $artifacts{"$c:$target"} = $scope;
 	}
     }
-    foreach my $k (keys %artifacts){
-	print "$k -> $artifacts{$k}\n";
-    }
+    
+#    foreach my $k (keys %artifacts){
+#	print "-------- $k -> $artifacts{$k}\n";
+#    }
     
     my($lib, $bin, $archive);
 
@@ -498,7 +504,7 @@ sub collect_jar{
 			&install_dir_($root, "0755", $store);
 		    }
 		    &install_file_($root, "0644", $target, "$store");
-		    &link_file("$w", "$name", "../../libs/");
+		    &link_file("$w", "$name", "../../libs");
 		}
 	    }
 
@@ -513,8 +519,12 @@ sub link_file{
 #    print "$link_from_dir, $name, $link_to_dir \n";
     chdir($link_from_dir) or die "cd $link_from_dir failed";
 
-    `ln -s $link_to_dir/$name .`;
-    die "symbolic link $link_to_dir/$name failed" if($?);
+    if ( ! -l $name){
+	`ln -s $link_to_dir/$name .`;
+	die "symbolic link $link_to_dir/$name failed" if($?);
+    }else{
+	print STDERR "$name already exists. $link_from_dir $link_to_dir\n";
+    }
     chdir($cwd) or die "cd $cwd failed";
 }
 
