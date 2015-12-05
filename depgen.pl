@@ -1126,10 +1126,11 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog build dir (dirs...)             # build and archive files in local directory
       $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
       $prog deploy staging-user staging-host config (config...)       # deploy files on hosts
-      $prog clean  staging-user staging-host config (config...)       # clean installed files
+      $prog ssh staing-user staging-host config                       # ssh to login host
+      $prog clean  staging-user staging-host config (config...)       # currently not implemented
       $prog create-table staging-user staging-host [configs]          # currently not implemented
       $prog upload-table staging-user staging-host [configs]          # currently not implemented
-      $prog ssh config                                                # currently not implemented
+
       $prog help
 END_OF_USAGE
 
