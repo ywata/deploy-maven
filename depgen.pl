@@ -216,8 +216,10 @@ sub do_deploy_{
 
 	print STDERR "starting deployment for $host\n";
 	sleep 1;
+#	print "\nscp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX\n";
 	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX");
-	&ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script", " -t ", $staging_user, $staging_host);
+#	print "$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script\n";
+	&ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $script", " -t ", $staging_user, $staging_host);
     }
     
 }
@@ -289,7 +291,7 @@ sub do_build_{
 sub create_deploy_self_{
     my($tag, $ver, $prod, $lib, $bin, $archive, @dirs)  = @_;
     my($lib_) = (split /\//, $lib)[-1];
-    my($sh) = "eploy_self.sh";
+    my($sh) = "deploy_self.sh";
 
     my $content =  << "END_OF_DEPLOY";
 # The script runs on target server.
@@ -365,11 +367,12 @@ target_host=\$2
 target_top=\$3
 rep_script=\$4
 
+ssh \$target_user\@\$target_host sudo rm -rf $CHROOT
 ssh \$target_user\@\$target_host mkdir $CHROOT
 scp $archive \$target_user\@\$target_host:$CHROOT
 ssh -t \$target_user\@\$target_host tar xzf $archive -C $CHROOT
-scp -t \$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
-ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top \$rep_script
+scp $CHROOTX/\$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
+ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top $CHROOT/$install_top/\$rep_script
 END_OF_DEPLOY
 #    print "$content";
     &create_script_("$CHROOT/$bin", $sh, $content);
@@ -659,7 +662,7 @@ sub change_owner_mode_in_chroot_{
 	next if(not($d =~ m|^$install_dir|));
 	$content .= <<"END_OF_CONTENT";
 chown $root \$top/$d
-chomod 0755 \$top/$d
+chmod 0755 \$top/$d
 END_OF_CONTENT
     }
     return $content;
@@ -997,15 +1000,15 @@ sub read_global_settings{
 
 sub replace_command_{
     my($file, $op, $from, $to, @rest) = @_;### Ugly hack!
-    print "<$op> $from $to\n";
+#    print "<$op> $from $to\n";
     my($content);
 
     my $dir = $to;
     $dir =~ s|[^\/]+$||;
-    print ">>> $dir $to\n";
+#    print ">>> $dir $to\n";
     
     foreach my $rep (@rest){
-	print "$rep ";
+#	print "$rep ";
 	my($left, $right) = split(/-->/, $rep);
 	if($right eq ""){
 	    die "config file format error $rep";
