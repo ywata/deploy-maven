@@ -6,7 +6,7 @@ use strict "refs";
 use strict "subs";
 use warnings;
 
-my @BINS = ("/bin/", "/usr/bin/");
+my @BINS = ("/bin", "/usr/bin");
 my $TAR = "tar";
 my $SVN = "svn";
 my $RM  = "/bin/rm";
@@ -183,7 +183,7 @@ sub do_transfer_{
     my(@path) = split /\//, $archive;
     
     if(-f $archive ){
-	print STDERR "scp $archive $staging_user\@$staging_host:";
+#	print STDERR "scp $archive $staging_user\@$staging_host:";
 	&run_("scp $archive $staging_user\@$staging_host:");
     }else{
 	die "$archive not found.";
@@ -192,6 +192,7 @@ sub do_transfer_{
     &ssh_("mkdir $CHROOTX",  " -t ", $staging_user, $staging_host);
     &ssh_("tar xvzf $path[-1] -C $CHROOTX", "", $staging_user, $staging_host);
 }
+
 sub do_ssh_{
     my($staging_user, $staging_host, @configs) = @_;
     if($#configs != 0){
@@ -379,7 +380,7 @@ sub create_archive{
 
     &collect_config(@dirs);
     &collect_jar($lib, $arts, @dirs);
-    &create_change_mode_owner_($bin, "ch.sh");
+    &create_change_owner_mode_script_($bin, "ch.sh", $archive);
     
     &archive_($CHROOT, $archive);
 }
@@ -402,22 +403,22 @@ sub collect_config{
 	    $path =~ s|^\.\/||; # strip ./
 	    if($path =~    m|(.+)/bin/(.+\.sh)$|){
 		($tag, $dir, $from, $mode) = ("sh", &l($1), "$2", "0755");
-		$to = "$prod/$dir/bin/";
+		$to = "$prod/$dir/bin";
 	    }elsif($path =~ m|(.+)/bin/([^\.]+$)|){     #startup script
 		($tag, $dir, $from, $mode) = ("startup", &l($1), "$2",  "0644");
-		$to = "etc/init.d/";
+		$to = "etc/init.d";
 	    }elsif($path =~ m|(.+)/config/(logback.xml)|){
 		($tag, $dir, $from, $mode) = ("logback", &l($1), "$2", "0644");
-		$to = "$prod/$dir/config/";
+		$to = "$prod/$dir/config";
 	    }elsif($path =~ m|(.+)/config/(.+\.properties)|){
 		($tag, $dir, $from, $mode) = ("prop", &l($1), "$2", "0644");
-		$to = "$prod/$dir/config/";
+		$to = "$prod/$dir/config";
 	    }elsif($path =~ m|(.+)/config/(.+\.cron)|){
 		($tag, $dir, $from, $mode) = ("cron",&l($1), "$2", "0644");
-		$to = "$prod/$dir/config/";
+		$to = "$prod/$dir/config";
 	    }elsif($path =~ m|(.+)/sql/(.+.sql)|){
 		($tag, $dir, $from, $mode) = ("sql", &l($1), "$2", "0644");
-		$to =  "$prod/$dir/sql/";
+		$to =  "$prod/$dir/sql";
 	    }else{
 		next;
 	    }
@@ -624,13 +625,48 @@ sub install_opt{
     return @opt;
 }
 
-sub create_change_mode_owner_{
-    my($dir_sh, $sh) = @_;
-    my($content, $annotation);
-    $content = <<"END";
+sub create_change_owner_mode_script_{
+    my($dir_sh, $sh, $archive) = @_;
+    chdir $CHROOT or die "cd $CHROOT failed";
+    open(my $FIND, "find . -type d |") or die "find . | failed";
+    my @dirs;
+    while(<$FIND>){
+	chomp;
+	next if(m|^\.$|);
+	s/^\.\///;
+	push @dirs, $_;
+    }
+    chdir $cwd or die "cd $cwd failed";
+
+    my $in_chroot = &change_owner_mode_in_chroot_(@dirs);
+    my $instaled = &change_owner_mode_with_install_();
+    my $content = <<"END";
 top=\$1
+
+$in_chroot
+
+$instaled
 END
 
+
+    &create_script_("$CHROOT/$dir_sh", $sh, $content);    
+}
+
+sub change_owner_mode_in_chroot_{
+    my(@dirs) = @_;
+    my($content);
+    foreach my $d (@dirs){
+	next if(not($d =~ m|^$install_dir|));
+	$content .= <<"END_OF_CONTENT";
+chown $root \$top/$d
+chomod 0755 \$top/$d
+END_OF_CONTENT
+    }
+    return $content;
+}
+
+sub change_owner_mode_with_install_{
+    my($content);
     foreach my $p (@install_params){
 	my($owner, $mode, $path) = @$p;
 	$path =~ s|^$CHROOT||;
@@ -642,7 +678,7 @@ END
 	    $content .= "chown $owner \$top/$path\n";
 	}
     }
-    &create_script_("$CHROOT/$dir_sh", $sh, $content);
+    return $content;
 }
 
 sub install_{
