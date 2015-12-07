@@ -21,8 +21,8 @@ my $BUILD_CONFIG       = ".build_config";
 my $CHROOT = "chroot";
 my $CHROOTX = "$CHROOT" . "x";
 
-my $root = "bitnami.bitnami";
-my $tomcat = "bitnami.bitnami";
+my $root = "root.wheel";
+my $tomcat = "root.wheel";
 
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
@@ -252,7 +252,7 @@ sub do_build_{
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
 	print "$d:  mvn -X clean install dependency:copy-dependencies -Dmaven.test.skip=true\n";
-	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+#	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
 	chdir $cwd || die "cd $cwd failed";
     }
     my @dirs2 = &find_pom_dirs(@dirs);
@@ -407,41 +407,48 @@ sub collect_config{
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(my $path = <$FIND>){
 	    chomp $path;
+	    my($tag, $dir, $module, $from, $to, $mode) = ("", "", "", "", "", "");
 
-	    my($tag, $dir, $from, $to, $mode) = ("", "", "", "", "");
+
 	    $path =~ s|^\.\/||; # strip ./
-	    if($path =~    m|(.+)/bin/(.+\.sh)$|){
-		($tag, $dir, $from, $mode) = ("sh", &l($1), "$2", "0755");
-		$to = "$prod/$dir/bin";
+	    if($path =~    m|(.+)/config/([^\/]+\.sh)$|){
+		($tag, $dir, $module, $from, $mode) = ("config", $1, &l($1), "$2", "0755");
+		$to = "$prod/$module/bin";
 	    }elsif($path =~ m|(.+)/bin/([^\.]+$)|){     #startup script
-		($tag, $dir, $from, $mode) = ("startup", &l($1), "$2",  "0644");
+		($tag, $dir, $module, $from, $mode) 
+		    = ("startup",$1,  &l($1), "$2",  "0644");
 		$to = "etc/init.d";
-	    }elsif($path =~ m|(.+)/config/(logback.xml)|){
-		($tag, $dir, $from, $mode) = ("logback", &l($1), "$2", "0644");
-		$to = "$prod/$dir/config";
-	    }elsif($path =~ m|(.+)/config/(.+\.properties)|){
-		($tag, $dir, $from, $mode) = ("prop", &l($1), "$2", "0644");
-		$to = "$prod/$dir/config";
-	    }elsif($path =~ m|(.+)/config/(.+\.cron)|){
-		($tag, $dir, $from, $mode) = ("cron",&l($1), "$2", "0644");
-		$to = "$prod/$dir/config";
-	    }elsif($path =~ m|(.+)/sql/(.+.sql)|){
-		($tag, $dir, $from, $mode) = ("sql", &l($1), "$2", "0644");
-		$to =  "$prod/$dir/sql";
+	    }elsif($path =~ m|(.+)/config/(logback.xml)$|){
+		($tag, $dir, $module, $from, $mode) 
+		    = ("logback", $1, &l($1), "$2", "0644");
+		$to = "$prod/$module/config";
+	    }elsif($path =~ m|(.+)/config/([^\/]+\.properties)$|){
+		($tag, $dir, $module, $from, $mode) = ("prop", $1, &l($1), "$2", "0644");
+		$to = "$prod/$module/config";
+	    }elsif($path =~ m|(.+)/config/([^\/]+\.cron)$|){
+		($tag, $dir, $module, $from, $mode) = ("cron",$1, &l($1), "$2", "0644");
+		$to = "$prod/$module/config";
+	    }elsif($path =~ m|(.+)/sql/([^\/]+.sql)$|){
+		($tag, $dir, $module, $from, $mode) = ("sql", $1, &l($1), "$2", "0644");
+		$to =  "$prod/$module/sql";
 	    }else{
 		next;
 	    }
 	    next if( ! -f "$dir/pom.xml");
+
 	    $to =~ s|//|/|g;
 
-
+	    print "$tag $dir $module $from $to\n";
 	    if(! -d "$CHROOT/$to"){
 #		print ">>>$CHROOT/$to\n";		
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
 	    print "$path\n";
-	    &install_file_($root, $mode, $path, "$CHROOT/$to");
-
+	    if( ! -d $path){
+		&install_file_($root, $mode, $path, "$CHROOT/$to");
+	    }else{
+		print "install $path ignored\n";
+	    }
 	}
 	close($FIND);
     }
@@ -488,7 +495,7 @@ sub collect_jar{
 	    if($artifacts{"$combined_name"} eq "test"){
 		print "####$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
-		print ">>>>$target is OK $base $artifacts{$base}\n";
+		print ">>>>$target is OK $combined_name $artifacts{$combined_name}\n";
 		if($pack eq "war"){
 		    # War file will be
 		    if(! -d "$CHROOT/$tomcat_dir"){
@@ -562,7 +569,7 @@ sub get_deps_{
 	    chomp;
 	    if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 		my($gId, $artId, $packType, $version, $scope) = split /:/, $_; #/
-		my $target = "$3-$5.$4";
+		my $target = "$module:$3-$5.$4";
 		#		print "$target -> $6\n";
 		my @x = ($d, $target, $scope);
 		push @r, \@x;
@@ -625,7 +632,7 @@ sub archive_{
     }
 
     &run_("$TAR cvzf $archive @dirs");
-    
+    close($LS);
     chdir $cwd or die "cd $cwd";
 }
 
@@ -649,6 +656,7 @@ sub create_change_owner_mode_script_{
 	s/^\.\///;
 	push @dirs, $_;
     }
+    close($FIND);
     chdir $cwd or die "cd $cwd failed";
 
     my $in_chroot = &change_owner_mode_in_chroot_(@dirs);
@@ -706,7 +714,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-#    print "<$inst> <$from> <$to>\n";
+    print "<$inst> <$from> <$to>\n";
     &run_($inst);
 }
 
