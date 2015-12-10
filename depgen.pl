@@ -480,7 +480,7 @@ sub collect_config{
 		print "install $path ignored\n";
 	    }
 	}
-	close($FIND);
+	close($FIND) || die "find error";
     }
 }
 
@@ -547,7 +547,7 @@ sub collect_jar{
 	    }
 
 	}
-	close($FIND);
+	close($FIND) || die "find error";
     }
 }
 
@@ -612,7 +612,7 @@ sub get_deps_{
 	}
 #    }
 #    chdir $cwd or die "cd $cwd failed";    
-    close($F);
+    close($F) || die "mvn dependency:list error";
 
     return @r;
 }
@@ -630,7 +630,7 @@ sub find_pom_dirs{
 	    push @r, $_;
 	}
     }
-    close($FIND);
+    close($FIND) || die "find error";
     return @r;
 }
 
@@ -665,7 +665,7 @@ sub archive_{
     }
 
     &run_("$TAR cvzf $archive @dirs");
-    close($LS);
+    close($LS) || die "ls";
     chdir $cwd or die "cd $cwd";
 }
 
@@ -689,7 +689,7 @@ sub create_change_owner_mode_script_{
 	s/^\.\///;
 	push @dirs, $_;
     }
-    close($FIND);
+    close($FIND) || die "find";
     chdir $cwd or die "cd $cwd failed";
 
     my $in_chroot = &change_owner_mode_in_chroot_(@dirs);
@@ -792,10 +792,10 @@ sub get_conf_{
 		chomp $f;
 		push @confs, $f;
 	    }
-	    close($F);
+	    close($F) || die "find";
 	}
     }
-    close($FIND);
+    close($FIND) || die "find";
     return \@confs;
 }
 
@@ -857,7 +857,7 @@ sub untar_{
 	    $top = $2;
 	}
     }
-    close($TAR);
+    close($TAR) || die "tar";
 
     if($top ne ""){
 	chdir $cwd || die "cd $dir failed";
@@ -951,7 +951,7 @@ sub readVersion_{
     open(my $F, "$f") or &get_tag(":");
     my($l) = <$F>;
     chomp($l);
-    close($F);
+    close($F) || die "read version";
     my($R, $V) = &get_tag("$l");
     return($R, $V);
 }
@@ -961,7 +961,7 @@ sub writeVersion_{
     my($R, $V) = &get_tag("$r:$v");
     open(my $F, ">$f") or die "cannot create $f";
     print $F "$R:$V";
-    close($F);
+    close($F) || die "write version";
 }
 
 sub install_setup{
