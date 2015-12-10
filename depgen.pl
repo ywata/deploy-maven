@@ -215,10 +215,9 @@ sub do_deploy_{
 	my $script = &create_replace_script_($host, %rep_info);
 
 	print STDERR "starting deployment for $host\n";
-	sleep 1;
-#	print "\nscp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX\n";
+	print "\nscp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX\n";
 	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX");
-#	print "$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script\n";
+	print "$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script\n";
 	&ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $script", " -t ", $staging_user, $staging_host);
     }
     
@@ -252,7 +251,7 @@ sub do_build_{
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
 	print "$d:  mvn -X clean install dependency:copy-dependencies -Dmaven.test.skip=true\n";
-#	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
+	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
 	chdir $cwd || die "cd $cwd failed";
     }
     my @dirs2 = &find_pom_dirs(@dirs);
@@ -264,7 +263,7 @@ sub do_build_{
 	foreach my $t (@triples){
 	    my($dir, $target, $scope) = @$t;
 	    my($c) = &l($dir);
-	    $artifacts{"$c:$target"} = $scope;
+	    $artifacts{"$target"} = $scope;
 	}
     }
     
@@ -311,31 +310,39 @@ mkdir \$top
 
 home="~\$user"
 
-sudotar="sudo tar xozf \$home/$CHROOT/$archive -C \$top"
+#(cd \$top; sudo tar xozf \$home/$CHROOT/$archive )
+sudotar="sudo tar xovzf \$home/$CHROOT/$archive -C \$top"
 eval \$sudotar   # be careful not to supply unnecessary thing
 
+echo "1"
 sudo \$rep_script \$top
+echo "2"
 sudo $CHROOT/$bin/ch.sh \$top
-
+echo "3"
 if [ -L \$top/$prod/lib ]; then
   sudo rm -f \$top/$prod/lib
 fi
 sudo ln -s $lib_ \$top/$prod/lib
 
-crons=`find $CHROOT -name "*.cron" `
-tmp=`mktemp tmp.XXXX`
-
-cat <<END>\$tmp
+#echo "4"
+#crons=`find $CHROOT -name "*.cron" `
+#echo "5"
+#tmp=`mktemp tmp.XXXX`
+#echo "6"
+#cat <<END>\$tmp
 # Registering cron job needs much care, since crontab -r removes all
 # the job registered for the user. It is recommended that you check
 # current registration with crontab -l and decide what should be done
 # If it is not registed, this shell script can help you a bit.
 # crontab -l # to check the current jobs
 # crontab crons
-END
-cat \$crons >> \$tmp
-mv \$tmp crons
-
+#END
+#echo "7"
+#cat \$crons >> \$tmp
+#echo "8"
+#mv \$tmp crons
+#echo "9"
+exit 0
 END_OF_DEPLOY
     &create_script_("$CHROOT/$bin", $sh, $content);
 }
@@ -373,10 +380,11 @@ target_host=\$2
 target_top=\$3
 rep_script=\$4
 
+
 ssh \$target_user\@\$target_host sudo rm -rf $CHROOT
 ssh \$target_user\@\$target_host mkdir $CHROOT
 scp $archive \$target_user\@\$target_host:$CHROOT
-ssh -t \$target_user\@\$target_host tar xzf $archive -C $CHROOT
+ssh -t \$target_user\@\$target_host tar xvzf $CHROOT/$archive -C $CHROOT
 scp $CHROOTX/\$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
 ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top $CHROOT/$install_top/\$rep_script
 END_OF_DEPLOY
@@ -414,11 +422,11 @@ sub collect_config{
 	    if($path =~    m|(.+)/config/([^\/]+\.sh)$|){
 		($tag, $dir, $module, $from, $mode) = ("config", $1, &l($1), "$2", "0755");
 		$to = "$prod/$module/bin";
-	    }elsif($path =~ m|(.+)/bin/([^\.]+$)|){     #startup script
+	    }elsif($path =~ m|(.+)/bin/([^\.\/]+)$|){     #startup script
 		($tag, $dir, $module, $from, $mode) 
 		    = ("startup",$1,  &l($1), "$2",  "0644");
 		$to = "etc/init.d";
-	    }elsif($path =~ m|(.+)/config/(logback.xml)$|){
+	    }elsif($path =~ m|(.+)/config/(logback\.xml)$|){
 		($tag, $dir, $module, $from, $mode) 
 		    = ("logback", $1, &l($1), "$2", "0644");
 		$to = "$prod/$module/config";
@@ -428,22 +436,29 @@ sub collect_config{
 	    }elsif($path =~ m|(.+)/config/([^\/]+\.cron)$|){
 		($tag, $dir, $module, $from, $mode) = ("cron",$1, &l($1), "$2", "0644");
 		$to = "$prod/$module/config";
-	    }elsif($path =~ m|(.+)/sql/([^\/]+.sql)$|){
+	    }elsif($path =~ m|(.+)/database/([^\/]+\.sql)$|){
+		# This is special treatment. This code will be removed after normalization.
+		($tag, $dir, $module, $from, $mode) = ("sql", $1, &l($1), "$2", "0644");
+		$to =  "$prod/$module/sql";
+	    }elsif($path =~ m|(.+)/sql/([^\/]+\.sql)$|){
 		($tag, $dir, $module, $from, $mode) = ("sql", $1, &l($1), "$2", "0644");
 		$to =  "$prod/$module/sql";
 	    }else{
 		next;
 	    }
-	    next if( ! -f "$dir/pom.xml");
-
+	    if(-f "$dir/pom.xml" or -f "$dir/../pom.xml"){
+#		print "2-1----->$tag <$dir> $module $from $to\n";
+	    }else{
+		next;
+#		print "2-2----->$tag <$dir> $module $from $to\n";
+	    }
 	    $to =~ s|//|/|g;
 
-	    print "$tag $dir $module $from $to\n";
 	    if(! -d "$CHROOT/$to"){
 #		print ">>>$CHROOT/$to\n";		
 		&install_dir_($root, "0755", "$CHROOT/$to");
 	    }
-	    print "$path\n";
+
 	    if( ! -d $path){
 		&install_file_($root, $mode, $path, "$CHROOT/$to");
 	    }else{
@@ -484,8 +499,10 @@ sub collect_jar{
 		#		print "Warning $_\n";
 		next;
 	    }
+	    print "$module $dep $name $target $pack\n";
 	    $module = &l($module);
 	    my($w) = "$CHROOT/$lib/$module";
+	    $module =~ s/_/\-/;
 	    my($store) = "$CHROOT/$install_dir/libs/";
 	    
 	    $target =~ m|([^/]+)$|;
@@ -495,7 +512,6 @@ sub collect_jar{
 	    if($artifacts{"$combined_name"} eq "test"){
 		print "####$target is used for test. Ignored. $base $artifacts{$base}\n";
 	    }else{
-		print ">>>>$target is OK $combined_name $artifacts{$combined_name}\n";
 		if($pack eq "war"){
 		    # War file will be
 		    if(! -d "$CHROOT/$tomcat_dir"){
@@ -570,6 +586,8 @@ sub get_deps_{
 	    if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 		my($gId, $artId, $packType, $version, $scope) = split /:/, $_; #/
 		my $target = "$module:$3-$5.$4";
+		$module =~ s/_/\-/;
+#		print "--------------$target  $scope\n";
 		#		print "$target -> $6\n";
 		my @x = ($d, $target, $scope);
 		push @r, \@x;
@@ -714,7 +732,7 @@ sub install_{
 	push @opt, " -d ";
     }
     my($inst) = "$INSTALL @opt $from $to";
-    print "<$inst> <$from> <$to>\n";
+#    print "<$inst> <$from> <$to>\n";
     &run_($inst);
 }
 
