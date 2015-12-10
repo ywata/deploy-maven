@@ -306,7 +306,9 @@ rep_script=\$3
 
 echo "\$user \$top \$rep_script"
 
-mkdir \$top
+if [ ! -d \$top ]; then
+  mkdir \$top
+fi
 
 home="~\$user"
 
