@@ -311,18 +311,22 @@ mkdir \$top
 home="~\$user"
 
 #(cd \$top; sudo tar xozf \$home/$CHROOT/$archive )
+echo "deploy_self tar $archive"
 sudotar="sudo tar xovzf \$home/$CHROOT/$archive -C \$top"
-eval \$sudotar   # be careful not to supply unnecessary thing
+eval \$sudotar || exit 1  # be careful not to supply unnecessary thing
 
-echo "1"
-sudo \$rep_script \$top
-echo "2"
-sudo $CHROOT/$bin/ch.sh \$top
-echo "3"
+echo "deploy_self \$rep_script \$top"
+sudo \$rep_script \$top || exit 1
+
+echo "deploy_self ch.sh"
+sudo $CHROOT/$bin/ch.sh \$top || exit 1
+echo "deploy_self check \$top/$prod/lib"
 if [ -L \$top/$prod/lib ]; then
-  sudo rm -f \$top/$prod/lib
+  sudo rm -f \$top/$prod/lib || exit 1
 fi
-sudo ln -s $lib_ \$top/$prod/lib
+
+echo "deploy_self ln -s"
+sudo ln -s $lib_ \$top/$prod/lib || exit 1
 
 #echo "4"
 #crons=`find $CHROOT -name "*.cron" `
@@ -380,13 +384,24 @@ target_host=\$2
 target_top=\$3
 rep_script=\$4
 
+echo "deploy_one rm $CHROOT"
+ssh \$target_user\@\$target_host rm -rf $CHROOT || exit 1
 
-ssh \$target_user\@\$target_host sudo rm -rf $CHROOT
-ssh \$target_user\@\$target_host mkdir $CHROOT
-scp $archive \$target_user\@\$target_host:$CHROOT
-ssh -t \$target_user\@\$target_host tar xvzf $CHROOT/$archive -C $CHROOT
-scp $CHROOTX/\$rep_script \$target_user\@\$target_host:$CHROOT/$install_top
+echo "deploy_one mkdir $CHROOT"
+ssh \$target_user\@\$target_host mkdir $CHROOT || exit 1
+
+echo "deploy_one scp $archive"
+scp $archive \$target_user\@\$target_host:$CHROOT || exit 1
+
+echo "deploy_one tar xvzf $archive"
+ssh -t \$target_user\@\$target_host tar xvzf $CHROOT/$archive -C $CHROOT || exit 1
+
+echo "deploy_one run \$rep_script"
+scp $CHROOTX/\$rep_script \$target_user\@\$target_host:$CHROOT/$install_top || exit 1
+
+echo "deploy_one running deploy_self"
 ssh -t \$target_user\@\$target_host $CHROOT/$bin/deploy_self.sh \$target_user \$target_top $CHROOT/$install_top/\$rep_script
+
 END_OF_DEPLOY
 #    print "$content";
     &create_script_("$CHROOT/$bin", $sh, $content);
