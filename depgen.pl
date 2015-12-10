@@ -824,15 +824,18 @@ sub ssh_{
     }
 }
 
+
 sub ssh__{
     my($user, $host, $command, @opt) = @_;
     #    print "ssh $host $command @opt\n";
     print STDERR "ssh $user\@$host $command @opt\n";
+
     open(my $SSH, "ssh @opt $user\@$host $command |") or die "ssh $host $command failed";
+
     while(<$SSH>){
 	print;
     }
-    close($SSH);
+    close($SSH) || die "ssh_ $command";
 }
 
 sub run_{
