@@ -1069,6 +1069,10 @@ sub replace_command_{
 	if($right eq ""){
 	    die "config file format error $rep";
 	}else{
+	    if($left =~ m/\'/ or $right =~ m/\'/){
+		warning "Check replace_command_ since it contains single quote.";
+		sleep 10;
+	    }
 	    $content .= "s|^$left\$|$right|;"
 	}
     }
