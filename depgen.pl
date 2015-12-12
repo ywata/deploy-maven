@@ -90,6 +90,10 @@ sub dispatch_{
 	&set_build_config();	
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_build_($t, $v, @argv);
+    }elsif(($ARGV[0] eq "archive")){
+	&set_build_config();	
+	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
+	&do_archive_($t, $v, @argv);
     }elsif(($ARGV[0] eq "transfer")){
 	&set_build_config();
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
@@ -244,9 +248,8 @@ sub do_build_{
     }else{
 	die "Non mvn wrapper is used as psuedo mvn.";
     }
-
     &run_("rm -rf \$HOME/.m2/repository/com"); #XXXX
-    my %artifacts;
+
 
     foreach my $d (@dirs){
 	chdir $d || die "cd $d failed";
@@ -254,8 +257,15 @@ sub do_build_{
 	&run_mvn("-X clean install dependency:copy-dependencies -Dmaven.test.skip=true");
 	chdir $cwd || die "cd $cwd failed";
     }
-    my @dirs2 = &find_pom_dirs(@dirs);
 
+}
+
+
+sub do_archive_{
+    my($tag, $ver, @dirs) = @_;
+    
+    my @dirs2 = &find_pom_dirs(@dirs);
+    my %artifacts;
     foreach my $d (@dirs2){
 	chdir $d || die "cd $d failed";	
     	my @triples = &get_deps_($d); #
@@ -266,11 +276,6 @@ sub do_build_{
 	    $artifacts{"$target"} = $scope;
 	}
     }
-    
-#    foreach my $k (keys %artifacts){
-#	print "-------- $k -> $artifacts{$k}\n";
-#    }
-    
     my($lib, $bin, $archive);
 
     if($ver eq ""){
@@ -290,7 +295,6 @@ sub do_build_{
     &create_deploy_one_($tag, $ver, $prod, $lib, $bin, $archive, "$CHROOT/$prod");
     &create_archive($tag, $ver, $lib, $bin, $archive, "$CHROOT/$prod", \%artifacts, @dirs);
 }
-
 
 
 sub create_deploy_self_{
@@ -489,16 +493,13 @@ sub collect_config{
 sub collect_jar{
     my($lib, $art, @dirs) = @_;
     my %artifacts = %$art;
-#    for my $k (keys %artifacts){
-#	print "$k\n";
-#    }
 
     foreach my $d (@dirs){
 	print "$d\n";
 	open(my $FIND, "find $d |") or die "find $d failed";
 	while(<$FIND>){
 	    if(m|jar$|){
-		print "$_";
+#		print "$_";
 	    }
 	    chomp;
 
@@ -516,7 +517,6 @@ sub collect_jar{
 		#		print "Warning $_\n";
 		next;
 	    }
-	    print "$module $dep $name $target $pack\n";
 	    $module = &l($module);
 	    my($w) = "$CHROOT/$lib/$module";
 	    $module =~ s/_/\-/;
@@ -526,8 +526,13 @@ sub collect_jar{
 	    my $base = $1;
 
 	    my $combined_name = "$module:$base";
+#	    foreach my $k (keys %artifacts){
+#		print "$combined_name <--> $k\n";
+#	    }
+
+
 	    if($artifacts{"$combined_name"} eq "test"){
-		print "####$target is used for test. Ignored. $base $artifacts{$base}\n";
+		print "####$target is used for test. Ignored. $base $artifacts{$combined_name}\n";
 	    }else{
 		if($pack eq "war"){
 		    # War file will be
@@ -595,14 +600,13 @@ sub get_deps_{
 	}
 	while(<$F>){
 	    chomp;	    
-	    
 	    last if(m|^\[INFO\] The following files have been resolved:|);
 	}
 	while(<$F>){
 	    chomp;
 	    if(m|\[INFO\] +((.+):(.+):(.+):(.+):(.+))|){
 		my($gId, $artId, $packType, $version, $scope) = split /:/, $_; #/
-		my $target = "$module:$3-$5.$4";
+		my $target = "$d:$3-$5.$4";
 		$module =~ s/_/\-/;
 #		print "--------------$target  $scope\n";
 		#		print "$target -> $6\n";
@@ -1070,7 +1074,7 @@ sub replace_command_{
 	    die "config file format error $rep";
 	}else{
 	    if($left =~ m/\'/ or $right =~ m/\'/){
-		warning "Check replace_command_ since it contains single quote.";
+		print STDERR "Check replace_command_ since it contains single quote.";
 		sleep 10;
 	    }
 	    $content .= "s|^$left\$|$right|;"
@@ -1173,7 +1177,8 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog checkout url                    # checkout latest source from url
       $prog tag-checkout tag url            # checkout latest source from url with tag
       $prog rev-checkout rev url            # checkout latest source from url with rev
-      $prog build dir (dirs...)             # build and archive files in local directory
+      $prog build dir (dirs...)             # build files in local directory
+      $prog archive dir (dirs...)           # build archive files in local directory
       $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
       $prog deploy staging-user staging-host config (config...)       # deploy files on hosts
       $prog ssh staing-user staging-host config                       # ssh to login host
