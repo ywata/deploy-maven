@@ -101,6 +101,9 @@ sub dispatch_{
     }elsif(($ARGV[0] eq "deploy")){
 	&set_build_config();
 	&do_deploy_(@argv);
+    }elsif(($ARGV[0] eq "print-deploy-script")){
+	&set_build_config();
+	&do_deploy_(@argv);
     }elsif(($ARGV[0] eq "ssh")){
 	&do_ssh_(@argv);
     }elsif(($ARGV[0] eq "get-license")){
@@ -208,7 +211,20 @@ sub do_ssh_{
 
 
 sub do_deploy_{
-    my($staging_user, $staging_host, @configs) = @_;
+    my($print) = @_;
+    my($just_print) = 0;
+    my($staging_user, $staging_host, @configs);
+
+
+    print "-----> $just_print\n";
+    
+    if($print eq "-print"){
+	$just_print = 1;
+	($print, $staging_user, $staging_host, @configs) = @_;
+    }else{
+	($staging_user, $staging_host, @configs) = @_;
+    }
+    
     if($#configs < 0){
 	&usage_($0);
     }
@@ -218,11 +234,15 @@ sub do_deploy_{
 	my($user, $host, $top, %rep_info) = &read_config($repfile); #%rep_info ($op, $from, $to, $reps);
 	my $script = &create_replace_script_($host, %rep_info);
 
-	print STDERR "starting deployment for $host\n";
 	print "\nscp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX\n";
-	&run_("scp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX");
-	print "$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script\n";
-	&ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $script", " -t ", $staging_user, $staging_host);
+	if(!$just_print){
+	    &run_("scp $CHROOT/$script $staging_user\@$staging_host:$CHROOTX");
+	}
+	print "run $CHROOTX/$prod/bin/deploy_one.sh $user $host $top $CHROOTX/$script\n";
+	if(!$just_print){
+	    &ssh_("$CHROOTX/$prod/bin/deploy_one.sh $user $host $top $script", " -t ", $staging_user, $staging_host);
+	}
+	
     }
     
 }
@@ -1082,21 +1102,31 @@ sub replace_command_{
     }
     if($op eq "CONF" or $op eq "SCRIPT"){
 	return <<"END_OF_SCRIPT";
+if [ -f $CHROOT/$file ]; then
 top=\$1
 
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $CHROOT/$file > \$f
 install -d $dir
 mv \$f $to
+else
+  echo "$CHROOT/$file not found."
+  exit 1
+fi
 END_OF_SCRIPT
     }elsif($op eq "CRON"){
 	return <<"END_OF_SCRIPT";
 top=\$1
 
+if [ -f $CHROOT/$file ]; then
 f=\`mktemp tmp.XXXXX\`
 sed -e \'$content \' $CHROOT/$file > \$f
 install -d $dir
 mv \$f $to
+else
+  echo "$CHROOT/$file not found."
+  exit 1
+fi
 END_OF_SCRIPT
 	    
     }else{
@@ -1181,6 +1211,7 @@ usage:$prog fetch                           # fetch jdk and apache-maven
       $prog archive dir (dirs...)           # build archive files in local directory
       $prog trasfer rchive-file staging-user staging-host     # transfer archived file to staging server
       $prog deploy staging-user staging-host config (config...)       # deploy files on hosts
+      $prog deploy -print staging-user staging-host config (config...)       # print how to use deploy script by manual
       $prog ssh staing-user staging-host config                       # ssh to login host
       $prog clean  staging-user staging-host config (config...)       # currently not implemented
       $prog create-table staging-user staging-host [configs]          # currently not implemented
