@@ -21,8 +21,8 @@ my $BUILD_CONFIG       = ".build_config";
 my $CHROOT = "chroot";
 my $CHROOTX = "$CHROOT" . "x";
 
-my $root = "root.wheel";
-my $tomcat = "root.wheel";
+my $root = "root.root";
+my $tomcat = "root.root";
 
 my @install_params;
 my @replace_file;   # fileName -> ref of s/// commands array.
@@ -99,9 +99,6 @@ sub dispatch_{
 	my($t, $v) = &readVersion_($BUILD_VERSION_FILE);
 	&do_transfer_($t, $v, @argv);
     }elsif(($ARGV[0] eq "deploy")){
-	&set_build_config();
-	&do_deploy_(@argv);
-    }elsif(($ARGV[0] eq "print-deploy-script")){
 	&set_build_config();
 	&do_deploy_(@argv);
     }elsif(($ARGV[0] eq "ssh")){
@@ -465,8 +462,8 @@ sub collect_config{
 		$to = "$prod/$module/bin";
 	    }elsif($path =~ m|(.+)/bin/([^\.\/]+)$|){     #startup script
 		($tag, $dir, $module, $from, $mode) 
-		    = ("startup",$1,  &l($1), "$2",  "0644");
-		$to = "etc/init.d";
+		    = ("startup",$1,  &l($1), "$2",  "0755");
+		$to = "$prod/etc/init.d";
 	    }elsif($path =~ m|(.+)/config/(logback\.xml)$|){
 		($tag, $dir, $module, $from, $mode) 
 		    = ("logback", $1, &l($1), "$2", "0644");
@@ -1088,14 +1085,16 @@ sub replace_command_{
 #    print ">>> $dir $to\n";
     
     foreach my $rep (@rest){
+	my $printed = 0;
 #	print "$rep ";
 	my($left, $right) = split(/-->/, $rep);
 	if($right eq ""){
 	    die "config file format error $rep";
 	}else{
-	    if($left =~ m/\'/ or $right =~ m/\'/){
+	    if($left =~ m/\'/ or $right =~ m/\'/ and $printed == 0){
 		print STDERR "Check replace_command_ since it contains single quote.";
-		sleep 10;
+		sleep 7;
+		$printed  = 1;
 	    }
 	    $content .= "s|^$left\$|$right|;"
 	}
